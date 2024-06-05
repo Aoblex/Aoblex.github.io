@@ -5,3 +5,5 @@ draft = false
 +++
 
 To be or not to be, that is the question.
+
+生存还是死亡，这是个问题。

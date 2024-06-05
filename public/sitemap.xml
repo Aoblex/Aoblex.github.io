@@ -2,13 +2,16 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
+    <loc>https://aoblex.github.io/posts/</loc>
+    <lastmod>2024-06-05T11:18:59+08:00</lastmod>
+  </url><url>
     <loc>https://aoblex.github.io/</loc>
-    <lastmod>2024-06-04T00:04:57+08:00</lastmod>
+    <lastmod>2024-06-05T11:18:59+08:00</lastmod>
+  </url><url>
+    <loc>https://aoblex.github.io/posts/2024-06-04-chennuli/</loc>
+    <lastmod>2024-06-05T11:18:59+08:00</lastmod>
   </url><url>
     <loc>https://aoblex.github.io/posts/my-first-post/</loc>
-    <lastmod>2024-06-04T00:04:57+08:00</lastmod>
-  </url><url>
-    <loc>https://aoblex.github.io/posts/</loc>
     <lastmod>2024-06-04T00:04:57+08:00</lastmod>
   </url><url>
     <loc>https://aoblex.github.io/categories/</loc>
