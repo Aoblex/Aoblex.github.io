@@ -2,3 +2,8 @@ baseURL = 'https://aoblex.github.io'
 languageCode = 'en-us'
 title = '踹踹农场'
 theme = 'PaperMod'
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
