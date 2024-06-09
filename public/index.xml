@@ -2,26 +2,36 @@
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
     <title>踹踹农场</title>
-    <link>https://aoblex.github.io/</link>
+    <link>http://localhost:1313/</link>
     <description>Recent content on 踹踹农场</description>
     <generator>Hugo -- 0.126.2</generator>
     <language>en-us</language>
-    <lastBuildDate>Wed, 05 Jun 2024 11:18:59 +0800</lastBuildDate>
-    <atom:link href="https://aoblex.github.io/index.xml" rel="self" type="application/rss+xml" />
+    <lastBuildDate>Sun, 09 Jun 2024 19:39:41 +0800</lastBuildDate>
+    <atom:link href="http://localhost:1313/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>蕉绿袭来</title>
+      <link>http://localhost:1313/posts/2024-06-09-anxiety/</link>
+      <pubDate>Sun, 09 Jun 2024 19:39:41 +0800</pubDate>
+      <guid>http://localhost:1313/posts/2024-06-09-anxiety/</guid>
+      <description>今天是一个普通的周日，一个被蕉绿淹没的周日。 在玩了若干小时的植物大战僵尸杂交版以及刷了一晚上的小红书后，我意识到：浪费的时间就这样浪费了。过去的日子里，这样浪费掉的时间有很多，以后这样浪费的时间也不会少。
+可是仔细一想，为什么一定要说是浪费呢？享受自己的摆烂人生有什么问题吗！嗯，或许这样没有什么意义。人生有什么意义呢？先快乐地度过每分每秒吧。
+Random Thoughts
+如果一个人吃掉自己的蕉绿，那么他的蕉绿会消失吗？ 还是说他会变得更蕉绿？</description>
+    </item>
     <item>
       <title>陈努力砂锅冒菜</title>
-      <link>https://aoblex.github.io/posts/2024-06-04-chennuli/</link>
+      <link>http://localhost:1313/posts/2024-06-04-chennuli/</link>
       <pubDate>Wed, 05 Jun 2024 11:18:59 +0800</pubDate>
-      <guid>https://aoblex.github.io/posts/2024-06-04-chennuli/</guid>
+      <guid>http://localhost:1313/posts/2024-06-04-chennuli/</guid>
       <description>看了董老师的朋友圈，和CaoeUU快乐地去吃火锅。可惜到得有点晚，没什么菜了。除了招牌牛肉，其他菜的味道都平平无奇。最恼火的莫过于打开豆花龟苓膏之后汁水撒到桌子上，滴了一地。人均67的自助餐，姑且认为吃牛肉吃回了票价吧。我喜欢墙上挂的那一排吉他和琵琶（其实应该是倒着的扇子）。
 Random Thoughts
 一件三十元的衣服被要了链接，是因为衣服有魅力呢，还是因为人有魅力呢，还是因为两者的结合有魅力呢？去问问要链接的人吧！</description>
     </item>
     <item>
       <title>My First Post</title>
-      <link>https://aoblex.github.io/posts/my-first-post/</link>
+      <link>http://localhost:1313/posts/my-first-post/</link>
       <pubDate>Tue, 04 Jun 2024 00:04:57 +0800</pubDate>
-      <guid>https://aoblex.github.io/posts/my-first-post/</guid>
+      <guid>http://localhost:1313/posts/my-first-post/</guid>
       <description>To be or not to be, that is the question.
 生存还是死亡，这是个问题。</description>
     </item>
