@@ -1,25 +1,34 @@
 <!DOCTYPE html>
 <html lang="en" dir="auto">
 
-<head><meta charset="utf-8">
+<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script><meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<meta name="robots" content="index, follow">
-<title>Tags | 踹踹农场</title>
+<meta name="robots" content="noindex, nofollow">
+<title>Chapter 2: Types, Operators, and Expressions | 踹踹农场</title>
 <meta name="keywords" content="">
-<meta name="description" content="">
+<meta name="description" content="Constants 1234 - int
+123456789[lL] - long
+1234[uU] - unsigned int
+1234(ul|UL) - unsigned long
+123.4, 1e-2 - double
+123.4[fF], 1e-2[fF] - float
+123.4[lL], 1e-2[lL] - long double
+[0]37 - octal, 8^0 * 7 &#43; 8^1 * 3 = 31
+(0x|0X)1[fF] - hex, 16^0 * 15 &#43; 16^1 * 1 = 31
+&lsquo;\[0-7]{3}&rsquo; - char constant in octal digits
+&lsquo;\x[0-9a-f]&#43;&rsquo; - char constant in hex digits">
 <meta name="author" content="">
-<link rel="canonical" href="https://aoblex.github.io/tags/">
+<link rel="canonical" href="http://localhost:1313/posts/the-c-programming-language-chap2/">
 <link crossorigin="anonymous" href="/assets/css/stylesheet.54405a410796490bc874ab6181fac9b675753cc2b91375d8f882566459eca428.css" integrity="sha256-VEBaQQeWSQvIdKthgfrJtnV1PMK5E3XY&#43;IJWZFnspCg=" rel="preload stylesheet" as="style">
-<link rel="icon" href="https://aoblex.github.io/favicon.ico">
-<link rel="icon" type="image/png" sizes="16x16" href="https://aoblex.github.io/favicon-16x16.png">
-<link rel="icon" type="image/png" sizes="32x32" href="https://aoblex.github.io/favicon-32x32.png">
-<link rel="apple-touch-icon" href="https://aoblex.github.io/apple-touch-icon.png">
-<link rel="mask-icon" href="https://aoblex.github.io/safari-pinned-tab.svg">
+<link rel="icon" href="http://localhost:1313/favicon.ico">
+<link rel="icon" type="image/png" sizes="16x16" href="http://localhost:1313/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="http://localhost:1313/favicon-32x32.png">
+<link rel="apple-touch-icon" href="http://localhost:1313/apple-touch-icon.png">
+<link rel="mask-icon" href="http://localhost:1313/safari-pinned-tab.svg">
 <meta name="theme-color" content="#2e2e33">
 <meta name="msapplication-TileColor" content="#2e2e33">
-<link rel="alternate" type="application/rss+xml" href="https://aoblex.github.io/tags/index.xml">
-<link rel="alternate" hreflang="en" href="https://aoblex.github.io/tags/">
+<link rel="alternate" hreflang="en" href="http://localhost:1313/posts/the-c-programming-language-chap2/">
 <noscript>
     <style>
         #theme-toggle,
@@ -57,20 +66,9 @@
 
     </style>
 </noscript>
-  
-
-<meta property="og:title" content="Tags" />
-<meta property="og:description" content="" />
-<meta property="og:type" content="website" />
-<meta property="og:url" content="https://aoblex.github.io/tags/" />
-
-<meta name="twitter:card" content="summary"/>
-<meta name="twitter:title" content="Tags"/>
-<meta name="twitter:description" content=""/>
-
 </head>
 
-<body class="list" id="top">
+<body class="" id="top">
 <script>
     if (localStorage.getItem("pref-theme") === "dark") {
         document.body.classList.add('dark');
@@ -85,7 +83,7 @@
 <header class="header">
     <nav class="nav">
         <div class="logo">
-            <a href="https://aoblex.github.io/" accesskey="h" title="踹踹农场 (Alt + H)">踹踹农场</a>
+            <a href="http://localhost:1313/" accesskey="h" title="踹踹农场 (Alt + H)">踹踹农场</a>
             <div class="logo-switches">
                 <button id="theme-toggle" accesskey="t" title="(Alt + T)">
                     <svg id="moon" xmlns="http://www.w3.org/2000/svg" width="24" height="18" viewBox="0 0 24 24"
@@ -114,16 +112,56 @@
     </nav>
 </header>
 <main class="main">
-<header class="page-header">
-    <h1>Tags</h1>
-</header>
 
-<ul class="terms-tags">
-</ul>
+<article class="post-single">
+  <header class="post-header">
+    
+    <h1 class="post-title entry-hint-parent">
+      Chapter 2: Types, Operators, and Expressions
+      <span class="entry-hint" title="Draft">
+        <svg xmlns="http://www.w3.org/2000/svg" height="35" viewBox="0 -960 960 960" fill="currentColor">
+          <path
+            d="M160-410v-60h300v60H160Zm0-165v-60h470v60H160Zm0-165v-60h470v60H160Zm360 580v-123l221-220q9-9 20-13t22-4q12 0 23 4.5t20 13.5l37 37q9 9 13 20t4 22q0 11-4.5 22.5T862.09-380L643-160H520Zm300-263-37-37 37 37ZM580-220h38l121-122-18-19-19-18-122 121v38Zm141-141-19-18 37 37-18-19Z" />
+        </svg>
+      </span>
+    </h1>
+    <div class="post-meta"><span title='2024-07-18 15:34:07 +0800 CST'>July 18, 2024</span>
+
+</div>
+  </header> 
+  <div class="post-content"><h1 id="constants">Constants<a hidden class="anchor" aria-hidden="true" href="#constants">#</a></h1>
+<p>1234 - int</p>
+<p>123456789[lL] - long</p>
+<p>1234[uU] - unsigned int</p>
+<p>1234(ul|UL) - unsigned long</p>
+<p>123.4, 1e-2 - double</p>
+<p>123.4[fF], 1e-2[fF] - float</p>
+<p>123.4[lL], 1e-2[lL] - long double</p>
+<p>[0]37 - octal, 8^0 * 7 + 8^1 * 3 = 31</p>
+<p>(0x|0X)1[fF] - hex, 16^0 * 15 + 16^1 * 1 = 31</p>
+<p>&lsquo;\[0-7]{3}&rsquo; - char constant in octal digits</p>
+<p>&lsquo;\x[0-9a-f]+&rsquo; - char constant in hex digits</p>
+
+
+  </div>
+
+  <footer class="post-footer">
+    <ul class="post-tags">
+    </ul>
+  </footer>
+
+  <script src="https://utteranc.es/client.js"
+        repo="Aoblex/Aoblex.github.io"
+        issue-term="pathname"
+        theme="github-light"
+        crossorigin="anonymous"
+        async>
+  </script>
+</article>
     </main>
     
 <footer class="footer">
-        <span>&copy; 2024 <a href="https://aoblex.github.io/">踹踹农场</a></span> · 
+        <span>&copy; 2024 <a href="http://localhost:1313/">踹踹农场</a></span> · 
 
     <span>
         Powered by
