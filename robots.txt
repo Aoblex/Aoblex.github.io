@@ -1,0 +1,4 @@
+User-agent: *
+Disallow:
+
+Sitemap: https://aoblex.github.io/sitemap.xml
