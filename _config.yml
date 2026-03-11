@@ -185,12 +185,8 @@ kramdown:
 # Includes & excludes
 include: ["_pages", "_scripts"]
 exclude:
-  - CONTRIBUTING.md
-  - CUSTOMIZE.md
-  - FAQ.md
   - Gemfile
   - Gemfile.lock
-  - INSTALL.md
   - LICENSE
   - package.json
   - package-lock.json
