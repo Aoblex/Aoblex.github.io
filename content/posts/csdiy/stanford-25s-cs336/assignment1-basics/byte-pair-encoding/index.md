@@ -54,3 +54,27 @@ There are three types of UTF algorithms:
 - [UTF-32](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G28875): Assigns each Unicode scalar value to a single unsigned 32-bit code unit with the same numeric value as the Unicode scalar value.
 
 among which UTF-8 is the most widely used encoding on the web and we will use UTF-8 throughout this assignment.
+
+## Unicode Examples
+
+Here are the examples provided in the [writeup](https://github.com/stanford-cs336/assignment1-basics/blob/main/cs336_assignment1_basics.pdf) to explain how UTF-8 encoding and decoding works in python:
+
+```python
+>>> test_string = "hello! こんにちは!"
+>>> utf8_encoded = test_string.encode("utf-8")
+>>> print(utf8_encoded)
+b'hello! \xe3\x81\x93\xe3\x82\x93\xe3\x81\xab\xe3\x81\xa1\xe3\x81\xaf!'
+>>> print(type(utf8_encoded))
+<class 'bytes'>
+>>> # Get the byte values for the encoded string (integers from 0 to 255).
+>>> list(utf8_encoded)
+[104, 101, 108, 108, 111, 33, 32, 227, 129, 147, 227, 130, 147, 227, 129, 171, 227, 129,
+161, 227, 129, 175, 33]
+>>> # One byte does not necessarily correspond to one Unicode character!
+>>> print(len(test_string))
+13
+>>> print(len(utf8_encoded))
+23
+>>> print(utf8_encoded.decode("utf-8"))
+hello! こんにちは!
+```
