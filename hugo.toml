@@ -1,3 +1,6 @@
+baseURL = "https://aoblex.github.io/"
+title = "trytry's blog"
+locale = "en"
 theme = "PaperMod"
 
 [params]
