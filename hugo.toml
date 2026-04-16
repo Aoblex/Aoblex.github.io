@@ -9,10 +9,10 @@ home = ["HTML", "RSS", "JSON"]
 [params]
 # https://adityatelange.github.io/hugo-PaperMod/posts/papermod/papermod-features
 ShowReadingTime = true
-ShowShareButtons = true
 ShowPostNavLinks = true
 ShowBreadCrumbs = true
 ShowCodeCopyButtons = true
+ShowShareButtons = false
 
 [params.homeInfoParams]
 Title = "trytry's home"
