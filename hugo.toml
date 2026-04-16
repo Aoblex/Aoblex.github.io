@@ -25,6 +25,7 @@ ShowPostNavLinks = true
 ShowBreadCrumbs = true
 ShowCodeCopyButtons = true
 ShowShareButtons = false
+ShowToc = true
 
 [params.homeInfoParams]
 Title = "trytry's home"
