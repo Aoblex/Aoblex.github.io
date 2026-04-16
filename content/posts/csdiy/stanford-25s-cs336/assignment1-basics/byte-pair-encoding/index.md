@@ -78,3 +78,13 @@ b'hello! \xe3\x81\x93\xe3\x82\x93\xe3\x81\xab\xe3\x81\xa1\xe3\x81\xaf!'
 >>> print(utf8_encoded.decode("utf-8"))
 hello! こんにちは!
 ```
+
+# Byte-level Byte-pair Encoding
+
+{{< figure
+  src="figures/tokenization-level.png"
+  alt="tokenization level"
+  caption="tokenization level"
+  width="400"
+  align="center"
+>}}
