@@ -7,6 +7,7 @@ theme = "PaperMod"
 home = ["HTML", "RSS", "JSON"]
 
 [params]
+mainSections = ["posts"]
 # https://adityatelange.github.io/hugo-PaperMod/posts/papermod/papermod-features
 ShowReadingTime = true
 ShowPostNavLinks = true
