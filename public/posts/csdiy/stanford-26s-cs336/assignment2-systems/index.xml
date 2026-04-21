@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Assignment 2: Systems on </title>
+    <link>//localhost:1313/posts/csdiy/stanford-26s-cs336/assignment2-systems/</link>
+    <description>Recent content in Assignment 2: Systems on </description>
+    <generator>Hugo</generator>
+    <language>en</language>
+    <lastBuildDate></lastBuildDate>
+    <atom:link href="//localhost:1313/posts/csdiy/stanford-26s-cs336/assignment2-systems/index.xml" rel="self" type="application/rss+xml" />
+  </channel>
+</rss>

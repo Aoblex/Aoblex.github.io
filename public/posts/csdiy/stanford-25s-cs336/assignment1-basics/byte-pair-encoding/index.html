@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en" dir=" auto" data-theme="auto">
+
+<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
+    
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+
+<script>
+    MathJax = {
+        tex: {
+            displayMath: [['\\[', '\\]'], ['$$', '$$']],  
+            inlineMath: [['\\(', '\\)'], ['$', '$']]      
+        },
+        loader: {
+            load: ['ui/safe']
+        },
+    };
+</script>
+    <meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<meta name="robots" content="noindex, nofollow">
+<title>Byte Pair Encoding | trytry&#39;s blog</title>
+<meta name="keywords" content="">
+<meta name="description" content="The tokenizer is a function that takes in a string as input and outputs a list of substrings, called tokens, which is the most basic unit of language modeling.
+Note that in a computer, a string is represented as a sequence of bytes. So before modeling a tokenizer, we need to find out how the string is encoded into bytes.
+In this section, we will use the Unicode Standard and train a BPE tokenizer.">
+<meta name="author" content="">
+<link rel="canonical" href="http://localhost:1313/posts/csdiy/stanford-25s-cs336/assignment1-basics/byte-pair-encoding/">
+<link crossorigin="anonymous" href="/assets/css/stylesheet.4b72e7725c68fccaac08b7b94b4bf3724ac8531837c6717dbd3e55b5a23b0117.css" integrity="sha256-S3Lnclxo/MqsCLe5S0vzckrIUxg3xnF9vT5VtaI7ARc=" rel="preload stylesheet" as="style">
+<link rel="icon" href="http://localhost:1313/favicon.ico">
+<link rel="icon" type="image/png" sizes="16x16" href="http://localhost:1313/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="http://localhost:1313/favicon-32x32.png">
+<link rel="apple-touch-icon" href="http://localhost:1313/apple-touch-icon.png">
+<link rel="mask-icon" href="http://localhost:1313/safari-pinned-tab.svg">
+<meta name="theme-color" content="#2e2e33">
+<meta name="msapplication-TileColor" content="#2e2e33">
+<link rel="alternate" hreflang="en" href="http://localhost:1313/posts/csdiy/stanford-25s-cs336/assignment1-basics/byte-pair-encoding/">
+<noscript>
+    <style>
+        #theme-toggle,
+        .top-link {
+            display: none;
+        }
+
+    </style>
+    <style>
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --theme: rgb(29, 30, 32);
+                --entry: rgb(46, 46, 51);
+                --primary: rgb(218, 218, 219);
+                --secondary: rgb(155, 156, 157);
+                --tertiary: rgb(65, 66, 68);
+                --content: rgb(196, 196, 197);
+                --code-block-bg: rgb(46, 46, 51);
+                --code-bg: rgb(55, 56, 62);
+                --border: rgb(51, 51, 51);
+                color-scheme: dark;
+            }
+
+            .list {
+                background: var(--theme);
+            }
+
+            .toc {
+                background: var(--entry);
+            }
+        }
+
+    </style>
+</noscript>
+<script>
+    if (localStorage.getItem("pref-theme") === "dark") {
+        document.querySelector("html").dataset.theme = 'dark';
+    } else if (localStorage.getItem("pref-theme") === "light") {
+       document.querySelector("html").dataset.theme = 'light';
+    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.querySelector("html").dataset.theme = 'dark';
+    } else {
+        document.querySelector("html").dataset.theme = 'light';
+    }
+
+</script>
+</head>
+
+    <body id="top">
+        <header class="header">
+    <nav class="header-nav">
+        <div class="logo">
+            <a href="http://localhost:1313/" accesskey="h" title="trytry&#39;s blog (Alt + H)">trytry&#39;s blog</a>
+            <div class="logo-switches">
+                <button id="theme-toggle" class="theme-toggle" accesskey="t" title="(Alt + T)" aria-label="Toggle theme">
+                    <svg class="moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                    <svg class="sun" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <ul id="menu" class="menu">
+            <li>
+                <a href="http://localhost:1313/posts/" title="Posts">
+                    <span>Posts</span>
+                </a>
+            </li>
+            <li>
+                <a href="http://localhost:1313/archives/" title="Archives">
+                    <span>Archives</span>
+                </a>
+            </li>
+            <li>
+                <a href="http://localhost:1313/search/" title="Search (Alt &#43; /)" accesskey=/>
+                    <span>Search</span>
+                </a>
+            </li>
+            <li>
+                <a href="http://localhost:1313/about/" title="About">
+                    <span>About</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+</header>
+<main class="main">
+
+<article class="post-single">
+  <header class="post-header">
+    <nav class="breadcrumbs" role="navigation" aria-label="Breadcrumb">
+    <a href='http://localhost:1313/'>Home</a>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <a href="http://localhost:1313/posts/">Posts</a>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <a href="http://localhost:1313/posts/csdiy/">CSDIY</a>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <a href="http://localhost:1313/posts/csdiy/stanford-25s-cs336/">CS336: Language Modeling from Scratch (Spring 2025)</a>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            <a href="http://localhost:1313/posts/csdiy/stanford-25s-cs336/assignment1-basics/">Assignment 1: Basics</a></nav>
+    <h1 class="post-title entry-hint-parent">
+      Byte Pair Encoding
+    </h1>
+    <div class="post-meta"><span title='2026-04-16 20:31:41 +0800 CST'>April 16, 2026</span>&nbsp;·&nbsp;<span>4 min</span>
+
+</div>
+  </header> <details class="toc" >
+    <summary accesskey="c" title="(Alt + C)">
+        <span class="title">Table of Contents</span>
+    </summary>
+
+    <div class="inner"><ul>
+            <li>
+                <a href="#the-unicode-standard" aria-label="The Unicode Standard">The Unicode Standard</a><ul>
+                    
+            <li>
+                <a href="#code-points" aria-label="Code Points">Code Points</a></li>
+            <li>
+                <a href="#unicode-transformation-format" aria-label="Unicode Transformation Format">Unicode Transformation Format</a></li>
+            <li>
+                <a href="#unicode-examples" aria-label="Unicode Examples">Unicode Examples</a></li></ul>
+            </li>
+            <li>
+                <a href="#levels-of-tokenization" aria-label="Levels of Tokenization">Levels of Tokenization</a></li>
+            <li>
+                <a href="#byte-level-byte-pair-encoding-bpe" aria-label="Byte-Level Byte Pair Encoding (BPE)">Byte-Level Byte Pair Encoding (BPE)</a>
+            </li>
+        </ul>
+    </div>
+</details>
+
+  <div class="post-content md-content"><p>The tokenizer is a function that takes in a string as input and outputs a list of substrings, called <strong>tokens</strong>, which is the most basic unit of language modeling.</p>
+<p>Note that in a computer, a string is represented as a sequence of bytes. So before modeling a tokenizer, we need to find out how the string is encoded into bytes.</p>
+<p>In this section, we will use <strong>the Unicode Standard</strong> and train a <strong>BPE</strong> tokenizer.</p>
+<h1 id="the-unicode-standard">The Unicode Standard<a hidden class="anchor" aria-hidden="true" href="#the-unicode-standard">#</a></h1>
+<p><a href="https://home.unicode.org/technical-quick-start-guide/#:~:text=The%20Unicode%20Standard%20refers%20to%20the%20standard%20character%20set%20that%20represents%20all%20natural%20language%20characters.%20Unicode%20can%20encode%20up%20to%20roughly%201.1%20million%20characters%2C%20allowing%20it%20to%20support%20all%20of%20the%20world%E2%80%99s%20languages%20and%20scripts%20in%20a%20single%2C%20universal%20standard.">The Unicode Standard</a> refers to the standard character set that represents all natural language characters. Unicode can encode up to roughly 1.1 million characters, allowing it to support all of the world’s languages and scripts in a single, universal standard.</p>
+<h2 id="code-points">Code Points<a hidden class="anchor" aria-hidden="true" href="#code-points">#</a></h2>
+$$
+\text{The Unicode Standard} = \{\text{character(char)}\} \xrightarrow{\text{encoding}} \{\text{code point(int)}\}
+$$<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">codepoint</span>(c):
+</span></span><span style="display:flex;"><span><span style="color:#f92672">...</span>     <span style="color:#66d9ef">return</span> <span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;U+</span><span style="color:#e6db74">{</span>ord(c)<span style="color:#e6db74">:</span><span style="color:#e6db74">04X</span><span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> codepoint(<span style="color:#e6db74">&#39;a&#39;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#e6db74">&#39;U+0061&#39;</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> codepoint(<span style="color:#e6db74">&#39;吃&#39;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#e6db74">&#39;U+5403&#39;</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> codepoint(<span style="color:#e6db74">&#39;💩&#39;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#e6db74">&#39;U+1F4A9&#39;</span>
+</span></span></code></pre></div><p>In general, we can consider it as <strong>a giant table that maps each character to a unique integer</strong>, called a <em>code point</em>. Current <a href="https://www.unicode.org/versions/Unicode17.0.0/">Unicode 17</a> has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 <a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-2/#G16433">planes</a>, each with 65,536 code points).</p>
+<h2 id="unicode-transformation-format">Unicode Transformation Format<a hidden class="anchor" aria-hidden="true" href="#unicode-transformation-format">#</a></h2>
+$$
+\text{UTF} = \{\text{code point(int)}\} \xrightarrow{\text{encoding}} \{\text{byte sequence(bytes)}\}
+$$<p>It would be wasteful to encode each character with the corresponding code point, which costs 4 bytes. So we have <a href="https://unicode.org/faq/utf_bom#:~:text=(SCSU).-,Q%3A%20What%20is%20a%20UTF%3F,-A%20Unicode%20transformation">UTF</a> (Unicode Transformation Format) to save space. It is an algorithmic mapping from every Unicode code point (except <a href="https://www.unicode.org/glossary/#surrogate_code_point">surrogate code points</a>) to a unique byte sequence.</p>
+<blockquote>
+<p>Each UTF is reversible, thus every UTF supports lossless round tripping: mapping from any Unicode coded character sequence S to a sequence of bytes and back will produce S again. To ensure round tripping, a UTF mapping must have a mapping for all code points (except surrogate code points). This includes reserved or unassigned code points and the 66 noncharacters (including U+FFFE and U+FFFF). In addition to being lossless, UTFs are unique: any given coded character sequence will always result in the same sequence of bytes for a given UTF.</p>
+</blockquote>
+<p>There are three types of UTF algorithms:</p>
+<ul>
+<li>
+<p><a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31703">UTF-8</a>: Assigns each Unicode scalar value to an unsigned byte sequence of one to four bytes in length according to <a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G27288">table 1</a> and <a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G27506">table 2</a>.</p>
+</li>
+<li>
+<p><a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31699">UTF-16</a>: Assigns 16-bit code for common characters (<code>U+0000</code> to <code>U+FFFF</code>) and assigns other characters to a surrogate pair according to the <a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G27792">table</a>.</p>
+</li>
+<li>
+<p><a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G28875">UTF-32</a>: Assigns each Unicode scalar value to a single unsigned 32-bit code unit with the same numeric value as the Unicode scalar value.</p>
+</li>
+</ul>
+<p>among which UTF-8 is the most widely used encoding on the web and we will use UTF-8 throughout this assignment.</p>
+<h2 id="unicode-examples">Unicode Examples<a hidden class="anchor" aria-hidden="true" href="#unicode-examples">#</a></h2>
+<p>Here are the examples provided in the <a href="https://github.com/stanford-cs336/assignment1-basics/blob/main/cs336_assignment1_basics.pdf">writeup</a> to explain how UTF-8 encoding and decoding works in python:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> test_string <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;hello! こんにちは!&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> utf8_encoded <span style="color:#f92672">=</span> test_string<span style="color:#f92672">.</span>encode(<span style="color:#e6db74">&#34;utf-8&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> print(utf8_encoded)
+</span></span><span style="display:flex;"><span><span style="color:#e6db74">b</span><span style="color:#e6db74">&#39;hello! </span><span style="color:#ae81ff">\xe3\x81\x93\xe3\x82\x93\xe3\x81\xab\xe3\x81\xa1\xe3\x81\xaf</span><span style="color:#e6db74">!&#39;</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> print(type(utf8_encoded))
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&lt;</span><span style="color:#66d9ef">class</span> <span style="color:#960050;background-color:#1e0010">&#39;</span><span style="color:#a6e22e">bytes</span><span style="color:#e6db74">&#39;&gt;</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> <span style="color:#75715e"># Get the byte values for the encoded string (integers from 0 to 255).</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> list(utf8_encoded)
+</span></span><span style="display:flex;"><span>[<span style="color:#ae81ff">104</span>, <span style="color:#ae81ff">101</span>, <span style="color:#ae81ff">108</span>, <span style="color:#ae81ff">108</span>, <span style="color:#ae81ff">111</span>, <span style="color:#ae81ff">33</span>, <span style="color:#ae81ff">32</span>, <span style="color:#ae81ff">227</span>, <span style="color:#ae81ff">129</span>, <span style="color:#ae81ff">147</span>, <span style="color:#ae81ff">227</span>, <span style="color:#ae81ff">130</span>, <span style="color:#ae81ff">147</span>, <span style="color:#ae81ff">227</span>, <span style="color:#ae81ff">129</span>, <span style="color:#ae81ff">171</span>, <span style="color:#ae81ff">227</span>, <span style="color:#ae81ff">129</span>,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">161</span>, <span style="color:#ae81ff">227</span>, <span style="color:#ae81ff">129</span>, <span style="color:#ae81ff">175</span>, <span style="color:#ae81ff">33</span>]
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> <span style="color:#75715e"># One byte does not necessarily correspond to one Unicode character!</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> print(len(test_string))
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> print(len(utf8_encoded))
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">23</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> print(utf8_encoded<span style="color:#f92672">.</span>decode(<span style="color:#e6db74">&#34;utf-8&#34;</span>))
+</span></span><span style="display:flex;"><span>hello<span style="color:#960050;background-color:#1e0010">!</span> こんにちは<span style="color:#960050;background-color:#1e0010">!</span>
+</span></span></code></pre></div><h1 id="levels-of-tokenization">Levels of Tokenization<a hidden class="anchor" aria-hidden="true" href="#levels-of-tokenization">#</a></h1>
+<figure class="align-center ">
+    <img loading="lazy" src="figures/tokenization-level.png#center"
+         alt="tokenization level" width="400"/> <figcaption>
+            <p>tokenization level</p>
+        </figcaption>
+</figure>
+
+<p>With UTF-8 encoding, we are essentially taking a sequence of codepoints (integers in the range $0$ to $159,801$) and transforming it into a sequence of byte values (integers in the range $0$ to $255$). So basically the text input is just <strong>a list of byte values</strong>.</p>
+<p>There are several ways to tokenize such kind of input, primarily based on the level of tokenization:</p>
+<ul>
+<li>
+<p><a href="https://arxiv.org/pdf/2105.13626"><strong>Byte-Level</strong></a>: If we use $0-255$ as tokens, then we do not need to worry about out-of-vocabulary tokens. But the sequence length will be much longer, which makes both training and inference more expensive.</p>
+</li>
+<li>
+<p><strong>Word-Level</strong>: If we use words as tokens, then the sequence length will be much shorter, but we need to worry about out-of-vocabulary tokens.</p>
+</li>
+<li>
+<p><strong>Subword-Level</strong>: Almost all modern language models use subword-level tokenization, which  trades-off a larger vocabulary size for better compression of the input byte sequence. Examples include BPE<a href="https://arxiv.org/pdf/1508.07909">(Sennrich et al., 2015)</a>, WordPiece<a href="https://static.googleusercontent.com/media/research.google.com/zh-CN//pubs/archive/37842.pdf">(Schuster and Nakajima, 2012)</a> and Unigram<a href="https://arxiv.org/pdf/1804.10959">(Kudo, 2018)</a>. In this assignment, we will focus on BPE.</p>
+</li>
+</ul>
+<h1 id="byte-level-byte-pair-encoding-bpe">Byte-Level Byte Pair Encoding (BPE)<a hidden class="anchor" aria-hidden="true" href="#byte-level-byte-pair-encoding-bpe">#</a></h1>
+
+
+  </div>
+
+  <footer class="post-footer">
+    <ul class="post-tags">
+    </ul>
+
+  </footer>
+</article>
+        </main>
+        
+<footer class="footer">
+        <span>&copy; 2026 <a href="http://localhost:1313/">trytry&#39;s blog</a></span> · 
+
+    <span>
+        Powered by
+        <a href="https://gohugo.io/" rel="noopener noreferrer" target="_blank">Hugo</a> &
+        <a href="https://github.com/adityatelange/hugo-PaperMod/" rel="noopener" target="_blank">PaperMod</a>
+    </span>
+</footer>
+<a href="#top" id="top-link" class="top-link hidden" aria-label="go to top" title="Go to Top (Alt + G)" accesskey="g">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevrons-up">
+        <polyline points="17 11 12 6 7 11"></polyline>
+        <polyline points="17 18 12 13 7 18"></polyline>
+    </svg>
+</a>
+
+<script>
+    let menu = document.getElementById('menu');
+    if (menu) {
+        
+        const scrollPosition = localStorage.getItem("menu-scroll-position");
+        if (scrollPosition) {
+            menu.scrollLeft = parseInt(scrollPosition, 10);
+        }
+        
+        menu.onscroll = function () {
+            localStorage.setItem("menu-scroll-position", menu.scrollLeft);
+        }
+    }
+
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener("click", function (e) {
+            e.preventDefault();
+            var id = this.getAttribute("href").substr(1);
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView({
+                    behavior: "smooth"
+                });
+            } else {
+                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView();
+            }
+            if (id === "top") {
+                history.replaceState(null, null, " ");
+            } else {
+                history.pushState(null, null, `#${id}`);
+            }
+        });
+    });
+
+</script>
+<script>
+    var toplink = document.getElementById("top-link");
+    window.onscroll = function () {
+        const scrollThreshold = window.innerHeight;
+        if (document.body.scrollTop > scrollThreshold || document.documentElement.scrollTop > scrollThreshold) {
+            toplink.classList.remove("hidden");
+        } else {
+            toplink.classList.add("hidden");
+        }
+    };
+
+</script>
+<script>
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+        const html = document.querySelector("html");
+        if (html.dataset.theme === "dark") {
+            html.dataset.theme = 'light';
+            localStorage.setItem("pref-theme", 'light');
+        } else {
+            html.dataset.theme = 'dark';
+            localStorage.setItem("pref-theme", 'dark');
+        }
+    })
+
+</script>
+<script>
+    document.querySelectorAll('pre > code').forEach((codeblock) => {
+        const container = codeblock.parentNode.parentNode;
+
+        const copybutton = document.createElement('button');
+        copybutton.classList.add('copy-code');
+        copybutton.innerHTML = 'copy';
+
+        function copyingDone() {
+            copybutton.innerHTML = 'copied!';
+            setTimeout(() => {
+                copybutton.innerHTML = 'copy';
+            }, 2000);
+        }
+
+        copybutton.addEventListener('click', (cb) => {
+            if ('clipboard' in navigator) {
+                navigator.clipboard.writeText(codeblock.textContent);
+                copyingDone();
+                return;
+            }
+
+            const range = document.createRange();
+            range.selectNodeContents(codeblock);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            try {
+                document.execCommand('copy');
+                copyingDone();
+            } catch (e) { };
+            selection.removeRange(range);
+        });
+
+        if (container.classList.contains("highlight")) {
+            container.appendChild(copybutton);
+        } else if (container.parentNode.firstChild == container) {
+            
+        } else if (codeblock.parentNode.parentNode.parentNode.parentNode.parentNode.nodeName == "TABLE") {
+            
+            codeblock.parentNode.parentNode.parentNode.parentNode.parentNode.appendChild(copybutton);
+        } else {
+            
+            codeblock.parentNode.appendChild(copybutton);
+        }
+    });
+</script>
+</body>
+
+</html>
