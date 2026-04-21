@@ -79,7 +79,7 @@ b'hello! \xe3\x81\x93\xe3\x82\x93\xe3\x81\xab\xe3\x81\xa1\xe3\x81\xaf!'
 hello! こんにちは!
 ```
 
-# Byte-level Byte-pair Encoding
+# Levels of Tokenization
 
 {{< figure
   src="figures/tokenization-level.png"
@@ -88,3 +88,15 @@ hello! こんにちは!
   width="400"
   align="center"
 >}}
+
+With UTF-8 encoding, we are essentially taking a sequence of codepoints (integers in the range $0$ to $159,801$) and transforming it into a sequence of byte values (integers in the range $0$ to $255$). So basically the text input is just **a list of byte values**.
+
+There are several ways to tokenize such kind of input, primarily based on the level of tokenization:
+
+- [**Byte-Level**](https://arxiv.org/pdf/2105.13626): If we use $0-255$ as tokens, then we do not need to worry about out-of-vocabulary tokens. But the sequence length will be much longer, which makes both training and inference more expensive.
+
+- **Word-Level**: If we use words as tokens, then the sequence length will be much shorter, but we need to worry about out-of-vocabulary tokens.
+
+- **Subword-Level**: Almost all modern language models use subword-level tokenization, which  trades-off a larger vocabulary size for better compression of the input byte sequence. Examples include BPE[(Sennrich et al., 2015)](https://arxiv.org/pdf/1508.07909), WordPiece[(Schuster and Nakajima, 2012)](https://static.googleusercontent.com/media/research.google.com/zh-CN//pubs/archive/37842.pdf) and Unigram[(Kudo, 2018)](https://arxiv.org/pdf/1804.10959). In this assignment, we will focus on BPE.
+
+# Byte-Level Byte Pair Encoding (BPE)
