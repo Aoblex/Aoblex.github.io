@@ -118,6 +118,8 @@ $$
 
 2. Split each _document_ by a given [**regular expression**](https://github.com/openai/tiktoken/pull/234/changes) and we get a list of _words_;
 
+- We first split by special tokens because they should never be split into multiple tokens and they will always be preserved as a single token.
+
 - We drop special tokens during BPE training, but we need to keep them in the encoding method because they should also be converted into token ids and feed to the model.
 
 - I introduce the terms _document_ and _word_ here just for better explanation.
@@ -132,3 +134,28 @@ $$
 
 > [!TIP] Why pre-tokenize with regular expression?
 > Once you have a vocabulary, you could, in principle, count how often bytes occur next to each other in your text and begin merging them starting with the most frequent pair of bytes. However, this is quite computationally expensive, since we’d have to take a full pass over the corpus each time we merge. In addition, directly merging bytes across the corpus may result in tokens that differ only in punctuation (e.g., dog! vs. dog.). These tokens would get completely different token IDs, even though they are likely to have high semantic similarity (since they differ only in punctuation). To avoid this, we pre-tokenize the corpus. You can think of this as a coarse-grained tokenization over the corpus that helps us count how often pairs of characters appear. For example, the word 'text' might be a pre-token that appears 10 times. In this case, when we count how often the characters ‘t’ and ‘e’ appear next to each other, we will see that the word ‘text’ has ‘t’ and ‘e’ adjacent and we can increment their count by 10 instead of looking through the corpus. Since we’re training a byte-level BPE model, each pretoken is represented as a sequence of UTF-8 bytes.
+
+**Compute BPE Merges** &nbsp; At merge stage, we repeat the following steps until we have the desired vocabulary size:
+
+1. Find **the most frequent** token pair in the training data;
+
+2. **Merge** the most frequent token pair into a new token and add it to the vocabulary;
+
+3. **Update** the training data by replacing all occurrences of the merged token pair with the new token, then go to step 1.
+
+- We count pairs within _words_ and we do not count cross-word token pairs for efficiency.
+
+- We deterministically break ties in pair frequency by preferring **the lexicographically greater pair**.
+
+> [!TIP] Word Boundaries
+> The original BPE formulation specifies the inclusion of an end-of-word token. We do not add an end-of-word-token when training byte-level BPE models because all bytes (including whitespace and punctuation) are included in the model’s vocabulary. Since we’re explicitly representing spaces and punctuation, the learned BPE merges will naturally reflect these word boundaries.
+> For example, in original BPE:
+>
+> - Original data: `apple`, `apple pie`, `apples`
+>
+> - Tokens without `</w>`: `a p p l e`, `p i e`, `a p p l e s`
+>
+> - New token: `apple`
+>
+> Then we can not tell whether `apple` is a single word or a prefix of `apples`. So `</w>` is needed to tell the difference between `apple` and `apple</w>`.
+> However, in byte-level BPE, whitespace and punctuation are preserved in the token, so the word boundaries are naturally reflected.
