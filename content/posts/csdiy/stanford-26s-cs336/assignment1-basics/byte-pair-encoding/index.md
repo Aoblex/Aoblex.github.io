@@ -100,3 +100,32 @@ There are several ways to tokenize such kind of input, primarily based on the le
 - **Subword-Level**: Almost all modern language models use subword-level tokenization, which  trades-off a larger vocabulary size for better compression of the input byte sequence. Examples include BPE[(Sennrich et al., 2015)](https://arxiv.org/pdf/1508.07909), WordPiece[(Schuster and Nakajima, 2012)](https://static.googleusercontent.com/media/research.google.com/zh-CN//pubs/archive/37842.pdf) and Unigram[(Kudo, 2018)](https://arxiv.org/pdf/1804.10959). In this assignment, we will focus on BPE.
 
 # Byte-Level Byte Pair Encoding (BPE)
+
+The BPE algorithm selects new subword units by **iteratively merging the most frequent pair of adjacent tokens** and replacing them with a new merged token. Such process of constructing the BPE tokenizer vocabulary is known
+as **training** the BPE tokenizer.
+
+The training process consists of several stages:
+
+**Initialization** &nbsp; For byte-level BPE, our initial vocabulary has 2 parts: 256 byte values and special tokens, including `<|endoftext|>`, etc.
+
+$$
+\text{vocab} = \{0: \text{bytes}([0]), \ldots, 255: \text{bytes}([255]), 256: \text{b'<|endoftext|>'}, \ldots \}
+$$
+
+**Pre-tokenization** &nbsp; The raw training data is preprocessed before training:
+
+1. Split raw text by **special tokens** and we get a list of _documents_;
+
+2. Split each _document_ by a given [**regular expression**](https://github.com/openai/tiktoken/pull/234/changes) and we get a list of _words_;
+
+- We drop special tokens during BPE training, but we need to keep them in the encoding method because they should also be converted into token ids and feed to the model.
+
+- I introduce the terms _document_ and _word_ here just for better explanation.
+
+{{< figure
+  src="figures/pre-tokenize.png"
+  alt="pre-tokenization"
+  caption="An example of pre-tokenization"
+  width="400"
+  align="center"
+>}}
