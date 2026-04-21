@@ -2,7 +2,7 @@ baseURL = "https://aoblex.github.io/"
 title = "trytry's blog"
 locale = "en"
 timeZone = "Asia/Shanghai"
-theme = "PaperMod"
+theme = ["hugo-admonitions", "PaperMod"]
 
 [outputs]
 home = ["HTML", "RSS", "JSON"]
