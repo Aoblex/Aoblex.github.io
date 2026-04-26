@@ -1,0 +1,24 @@
+{{- $src := .Get "src" -}}
+{{- $caption := .Get "caption" -}}
+{{- $alt := .Get "alt" | default ($caption | markdownify | plainify) -}}
+{{- $class := .Get "class" | default "" -}}
+{{- $link := .Get "link" -}}
+
+{{- if not $src -}}
+    {{- errorf "gallery-item shortcode requires a src parameter in %s" .Page.File.Path -}}
+{{- end -}}
+
+<figure class="image-gallery__item {{ $class }}">
+    {{- with $link -}}
+        <a href="{{ . }}">
+    {{- end -}}
+    <img loading="lazy" src="{{ $src }}"
+        {{- with $alt }} alt="{{ . }}"{{ end -}}
+        {{- with .Get "width" }} width="{{ . }}"{{ end -}}
+        {{- with .Get "height" }} height="{{ . }}"{{ end -}}
+    />
+    {{- with $link -}}</a>{{- end -}}
+    {{- if $caption -}}
+        <figcaption><p>{{ $caption | markdownify }}</p></figcaption>
+    {{- end -}}
+</figure>

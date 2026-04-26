@@ -5,15 +5,14 @@ date = '2026-04-16T20:31:41+08:00'
 draft = false
 +++
 
-The tokenizer is a function that takes in a string as input and outputs a list of substrings, called **tokens**, which is the most basic unit of language modeling.
 
-Note that in a computer, a string is represented as a sequence of bytes. So before modeling a tokenizer, we need to find out how the string is encoded into bytes.
+Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.
 
 In this section, we will use **the Unicode Standard** and train a **BPE** tokenizer.
 
 # The Unicode Standard
 
-[The Unicode Standard](https://home.unicode.org/technical-quick-start-guide/#:~:text=The%20Unicode%20Standard%20refers%20to%20the%20standard%20character%20set%20that%20represents%20all%20natural%20language%20characters.%20Unicode%20can%20encode%20up%20to%20roughly%201.1%20million%20characters%2C%20allowing%20it%20to%20support%20all%20of%20the%20world%E2%80%99s%20languages%20and%20scripts%20in%20a%20single%2C%20universal%20standard.) refers to the standard character set that represents all natural language characters. Unicode can encode up to roughly 1.1 million characters, allowing it to support all of the world’s languages and scripts in a single, universal standard.
+[The Unicode Standard](https://home.unicode.org/technical-quick-start-guide/#:~:text=The%20Unicode%20Standard%20refers%20to%20the%20standard%20character%20set%20that%20represents%20all%20natural%20language%20characters.%20Unicode%20can%20encode%20up%20to%20roughly%201.1%20million%20characters%2C%20allowing%20it%20to%20support%20all%20of%20the%20world%E2%80%99s%20languages%20and%20scripts%20in%20a%20single%2C%20universal%20standard.) refers to the standard character set that represents all natural language characters. Below are some important concepts.
 
 ## Code Points
 
@@ -41,43 +40,17 @@ $$
 \text{UTF} = \{\text{code point(int)}\} \xrightarrow{\text{encoding}} \{\text{byte sequence(bytes)}\}
 $$
 
-It would be wasteful to encode each character with the corresponding code point, which costs 4 bytes. So we have [UTF](https://unicode.org/faq/utf_bom#:~:text=(SCSU).-,Q%3A%20What%20is%20a%20UTF%3F,-A%20Unicode%20transformation) (Unicode Transformation Format) to save space. It is an algorithmic mapping from every Unicode code point (except [surrogate code points](https://www.unicode.org/glossary/#surrogate_code_point)) to a unique byte sequence.
-
-> Each UTF is reversible, thus every UTF supports lossless round tripping: mapping from any Unicode coded character sequence S to a sequence of bytes and back will produce S again. To ensure round tripping, a UTF mapping must have a mapping for all code points (except surrogate code points). This includes reserved or unassigned code points and the 66 noncharacters (including U+FFFE and U+FFFF). In addition to being lossless, UTFs are unique: any given coded character sequence will always result in the same sequence of bytes for a given UTF.
+It would be wasteful to encode each character with the corresponding code point, which costs 4 bytes. So we have [UTF](https://unicode.org/faq/utf_bom#:~:text=(SCSU).-,Q%3A%20What%20is%20a%20UTF%3F,-A%20Unicode%20transformation) (Unicode Transformation Format) to save space. It is an algorithmic mapping from every Unicode code point to a unique byte sequence.
 
 There are three types of UTF algorithms:
 
-- [UTF-8](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31703): Assigns each Unicode scalar value to an unsigned byte sequence of one to four bytes in length according to [table 1](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G27288) and [table 2](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G27506).
+- [UTF-8](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31703): 1 codepoint = $1 \sim 4$ bytes
 
-- [UTF-16](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31699): Assigns 16-bit code for common characters (`U+0000` to `U+FFFF`) and assigns other characters to a surrogate pair according to the [table](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G27792).
+- [UTF-16](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31699): 1 codepoint = $2 \text{ or } 4$ bytes
 
-- [UTF-32](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G28875): Assigns each Unicode scalar value to a single unsigned 32-bit code unit with the same numeric value as the Unicode scalar value.
+- [UTF-32](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G28875): 1 codepoint = 4 bytes
 
 among which UTF-8 is the most widely used encoding on the web and we will use UTF-8 throughout this assignment.
-
-## Unicode Examples
-
-Here are the examples provided in the [writeup](https://github.com/stanford-cs336/assignment1-basics/blob/main/cs336_assignment1_basics.pdf) to explain how UTF-8 encoding and decoding works in python:
-
-```python
->>> test_string = "hello! こんにちは!"
->>> utf8_encoded = test_string.encode("utf-8")
->>> print(utf8_encoded)
-b'hello! \xe3\x81\x93\xe3\x82\x93\xe3\x81\xab\xe3\x81\xa1\xe3\x81\xaf!'
->>> print(type(utf8_encoded))
-<class 'bytes'>
->>> # Get the byte values for the encoded string (integers from 0 to 255).
->>> list(utf8_encoded)
-[104, 101, 108, 108, 111, 33, 32, 227, 129, 147, 227, 130, 147, 227, 129, 171, 227, 129,
-161, 227, 129, 175, 33]
->>> # One byte does not necessarily correspond to one Unicode character!
->>> print(len(test_string))
-13
->>> print(len(utf8_encoded))
-23
->>> print(utf8_encoded.decode("utf-8"))
-hello! こんにちは!
-```
 
 # Levels of Tokenization
 
@@ -89,73 +62,162 @@ hello! こんにちは!
   align="center"
 >}}
 
-With UTF-8 encoding, we are essentially taking a sequence of codepoints (integers in the range $0$ to $159,801$) and transforming it into a sequence of byte values (integers in the range $0$ to $255$). So basically the text input is just **a list of byte values**.
+With UTF-8 encoding, we are essentially taking a sequence of codepoints which are encoded into **a sequence of bytes** ($\in \\{0, 1, \ldots, 255\\}$).
+That's what's fed into the entire modeling pipeline.
 
 There are several ways to tokenize such kind of input, primarily based on the level of tokenization:
 
-- [**Byte-Level**](https://arxiv.org/pdf/2105.13626): If we use $0-255$ as tokens, then we do not need to worry about out-of-vocabulary tokens. But the sequence length will be much longer, which makes both training and inference more expensive.
+| Level | Definition | Pros | Cons |
+| --- | --- | --- | --- |
+| [Byte](https://arxiv.org/pdf/2105.13626) | 1 token = 1 byte | No OOV token | Longer seqlen |
+| Word | 1 token = 1 word | Shorter seqlen | Potential OOV token |
+| Subword | 1 byte ≤ 1 token ≤ 1 word | No OOV token and shorter seqlen | More complex training process |
 
-- **Word-Level**: If we use words as tokens, then the sequence length will be much shorter, but we need to worry about out-of-vocabulary tokens.
-
-- **Subword-Level**: Almost all modern language models use subword-level tokenization, which  trades-off a larger vocabulary size for better compression of the input byte sequence. Examples include BPE[(Sennrich et al., 2015)](https://arxiv.org/pdf/1508.07909), WordPiece[(Schuster and Nakajima, 2012)](https://static.googleusercontent.com/media/research.google.com/zh-CN//pubs/archive/37842.pdf) and Unigram[(Kudo, 2018)](https://arxiv.org/pdf/1804.10959). In this assignment, we will focus on BPE.
+Most LLMs nowadays use **subword tokenization** such as [BPE](https://arxiv.org/abs/1508.07909), because it gives us the best of both worlds in terms of out-of-vocabulary handling and manageable input sequence lengths
 
 # Byte-Level Byte Pair Encoding (BPE)
 
-The BPE algorithm selects new subword units by **iteratively merging the most frequent pair of adjacent tokens** and replacing them with a new merged token. Such process of constructing the BPE tokenizer vocabulary is known
-as **training** the BPE tokenizer.
+Subword tokenizers with vocabularies constructed via BPE are often called **BPE tokenizers**.
+It starts with a byte-level vocabulary and iteratively adds new subword-level tokens.
 
-The training process consists of several stages:
+A trained BPE tokenizer encodes texts like this:
 
-**Initialization** &nbsp; For byte-level BPE, our initial vocabulary has 2 parts: 256 byte values and special tokens, including `<|endoftext|>`, etc.
+{{< gallery cols="2" gap="16px" align="center" >}}
+{{< gallery-item src="figures/bpe-text.png" alt="bpe text" caption="An example of BPE encoding from [tiktoken](https://platform.openai.com/tokenizer)" >}}
+{{< gallery-item src="figures/bpe-tokenids.png" alt="bpe token ids" caption="BPE token IDs" >}}
+{{< /gallery >}}
 
-$$
-\text{vocab} = \{0: \text{bytes}([0]), \ldots, 255: \text{bytes}([255]), 256: \text{b'<|endoftext|>'}, \ldots \}
-$$
+It consists of 3 essential parts:
 
-**Pre-tokenization** &nbsp; The raw training data is preprocessed before training:
+- `token2id: dict[Token, int]`: a mapping from **token** to **token id**
 
-1. Split raw text by **special tokens** and we get a list of _documents_;
+- `id2token: dict[int, Token]`: a mapping from **token id** to **token**
 
-2. Split each _document_ by a given [**regular expression**](https://github.com/openai/tiktoken/pull/234/changes) and we get a list of _words_;
+- `merges: list[tuple[Token, Token]]`: a list of merges produced during training ordered by order of creation.
 
-- We first split by special tokens because they should never be split into multiple tokens and they will always be preserved as a single token.
+> [!NOTE] Type Alias
+> I use `Token = bytes` as a type alias.
 
-- We drop special tokens during BPE training, but we need to keep them in the encoding method because they should also be converted into token ids and feed to the model.
+The training process is the process of learning the tokens and merges from the training data.
 
-- I introduce the terms _document_ and _word_ here just for better explanation.
+## BPE: Training
 
-{{< figure
-  src="figures/pre-tokenize.png"
-  alt="pre-tokenization"
-  caption="An example of pre-tokenization"
-  width="400"
-  align="center"
->}}
+We can divide BPE training into three stages below.
 
-> [!TIP] Why pre-tokenize with regular expression?
-> Once you have a vocabulary, you could, in principle, count how often bytes occur next to each other in your text and begin merging them starting with the most frequent pair of bytes. However, this is quite computationally expensive, since we’d have to take a full pass over the corpus each time we merge. In addition, directly merging bytes across the corpus may result in tokens that differ only in punctuation (e.g., dog! vs. dog.). These tokens would get completely different token IDs, even though they are likely to have high semantic similarity (since they differ only in punctuation). To avoid this, we pre-tokenize the corpus. You can think of this as a coarse-grained tokenization over the corpus that helps us count how often pairs of characters appear. For example, the word 'text' might be a pre-token that appears 10 times. In this case, when we count how often the characters ‘t’ and ‘e’ appear next to each other, we will see that the word ‘text’ has ‘t’ and ‘e’ adjacent and we can increment their count by 10 instead of looking through the corpus. Since we’re training a byte-level BPE model, each pretoken is represented as a sequence of UTF-8 bytes.
+### Initialization
 
-**Compute BPE Merges** &nbsp; At merge stage, we repeat the following steps until we have the desired vocabulary size:
+BPE initializes the vocabulary with special tokens and 256 byte values.
+The merges list is initialized as an empty list.
+```python
+token2id, id2token = {}, {}
+merges = []
+for special_token in special_tokens:
+    token = special_token.encode("utf-8")
+    token2id[token] = len(token2id)
+    id2token[len(id2token)] = token
+for i in range(256):
+    token = bytes([i])
+    token2id[token] = len(token2id)
+    id2token[len(id2token)] = token
+```
 
-1. Find **the most frequent** token pair in the training data;
+### Pre-tokenization
 
-2. **Merge** the most frequent token pair into a new token and add it to the vocabulary;
+This pre-tokenization stage could be generally considered as a coarse-grained tokenization over the corpus that helps us count how often pairs of tokens appear.
 
-3. **Update** the training data by replacing all occurrences of the merged token pair with the new token, then go to step 1.
+It has two steps:
 
-- We count pairs within _words_ and we do not count cross-word token pairs for efficiency.
+1. Split by **special tokens**: we do not want to split special tokens;
 
-- We deterministically break ties in pair frequency by preferring **the lexicographically greater pair**.
+2. Split by a given [**regular expression**](https://github.com/openai/tiktoken/pull/234/changes): this works better than `.split(' ')`;
 
-> [!TIP] Word Boundaries
-> The original BPE formulation specifies the inclusion of an end-of-word token. We do not add an end-of-word-token when training byte-level BPE models because all bytes (including whitespace and punctuation) are included in the model’s vocabulary. Since we’re explicitly representing spaces and punctuation, the learned BPE merges will naturally reflect these word boundaries.
-> For example, in original BPE:
+> [!NOTE] Terminology
+> For better consistency and clearness, I introduce the terms:
+> - _document_: the text after splitting by special tokens;
+> - _word_: the text after splitting by regular expression.
+
+```python
+import regex as re
+
+
+def split_by_special_tokens(text, special_tokens):
+    pattern = "|".join(re.escape(token) for token in special_tokens)
+    # note that the special tokens will be dropped in the output of re.split
+    # because we don't need them for training.
+    return re.split(pattern, text)
+
+
+def split_by_regex(text, pattern):
+    return re.findall(pattern, text)
+
+
+text = """low low lower lowest<|endoftext|>high high higher highest"""
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+special_tokens = ["<|endoftext|>"]
+
+documents = split_by_special_tokens(text, special_tokens)
+print(documents)
+# output:
+# ['low low lower lowest', 'high high higher highest']
+words = [word for document in documents for word in split_by_regex(document, PAT)]
+print(words)
+# output:
+# ['low', ' low', ' lower', ' lowest', 'high', ' high', ' higher', ' highest']
+```
+
+> [!NOTE] Why pre-tokenize?
+> It has several advantages:
 >
-> - Original data: `apple`, `apple pie`, `apples`
+> - **Improves training efficiency**: you can count the appearance of a _word_, then count pairs within the _word_ and multiply by the word count, which is much more efficient than looking through the entire corpus for each pair;
 >
-> - Tokens without `</w>`: `a p p l e`, `p i e`, `a p p l e s`
->
-> - New token: `apple`
->
-> Then we can not tell whether `apple` is a single word or a prefix of `apples`. So `</w>` is needed to tell the difference between `apple` and `apple</w>`.
-> However, in byte-level BPE, whitespace and punctuation are preserved in the token, so the word boundaries are naturally reflected.
+> - **Avoids different token ids for highly semantically similar tokens** (e.g. `dog!` vs. `dog.`): this is controlled by the regular expression;
+
+
+### Merge Iterations
+
+This is the core of the training process: **we iteratively pick the most frequent token pair and merge it into a new token until we reach the desired vocabulary size.**
+
+After pre-tokenization, we get a giant list of _words_. For faster training, we can compress the _words_ into a dictionary:
+
+```python
+def compress(words):
+    corpus = {}
+    for word in words:
+        tokens = tuple([bytes([w]) for w in word.encode("utf-8")])
+        corpus[tokens] = corpus.get(tokens, 0) + 1
+    return corpus
+
+
+corpus = compress(words)
+# output:
+# {
+#     (b" ", b"h", b"i", b"g", b"h"): 1,
+#     (b" ", b"h", b"i", b"g", b"h", b"e", b"r"): 1,
+#     (b" ", b"h", b"i", b"g", b"h", b"e", b"s", b"t"): 1,
+#     (b" ", b"l", b"o", b"w"): 1,
+#     (b" ", b"l", b"o", b"w", b"e", b"r"): 1,
+#     (b" ", b"l", b"o", b"w", b"e", b"s", b"t"): 1,
+#     (b"h", b"i", b"g", b"h"): 1,
+#     (b"l", b"o", b"w"): 1,
+# }
+```
+
+Then the training loop is like:
+
+1. Find the most frequent pair in the corpus:
+    ```python
+    (token1, token2) = get_most_frequent_pair(corpus)
+    ```
+
+2. Add the new merged token to the vocabulary and update the merges list:
+    ```python
+    new_token = token1 + token2
+    add_token(token2id, id2token, new_token)
+    add_merge(merges, token1, token2)
+    ```
+3. Update the corpus by replacing all occurrences of the merged pair with the new token:
+    ```python
+    corpus = update_corpus(corpus, token1, token2)
+    ```
+
+4. Repeat until we reach the desired vocabulary size.

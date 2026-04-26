@@ -1,0 +1,10 @@
+{{- $cols := .Get "cols" | default "2" -}}
+{{- $gap := .Get "gap" | default "1rem" -}}
+{{- $min := .Get "min" | default "220px" -}}
+{{- $align := .Get "align" | default "center" -}}
+{{- $class := .Get "class" | default "" -}}
+{{- $style := printf "--gallery-cols:%s;--gallery-gap:%s;--gallery-min:%s;" $cols $gap $min -}}
+
+<div class="image-gallery image-gallery--{{ $align }} {{ $class }}" style="{{ $style | safeCSS }}">
+    {{- .Inner -}}
+</div>

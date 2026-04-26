@@ -22,12 +22,26 @@
 <meta name="robots" content="noindex, nofollow">
 <title>Byte Pair Encoding | trytry&#39;s blog</title>
 <meta name="keywords" content="">
-<meta name="description" content="The tokenizer is a function that takes in a string as input and outputs a list of substrings, called tokens, which is the most basic unit of language modeling.
-Note that in a computer, a string is represented as a sequence of bytes. So before modeling a tokenizer, we need to find out how the string is encoded into bytes.
-In this section, we will use the Unicode Standard and train a BPE tokenizer.">
+<meta name="description" content="Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.
+In this section, we will use the Unicode Standard and train a BPE tokenizer.
+The Unicode Standard
+The Unicode Standard refers to the standard character set that represents all natural language characters. Below are some important concepts.
+Code Points
+$$
+\text{The Unicode Standard} = \{\text{character(char)}\} \xrightarrow{\text{encoding}} \{\text{code point(int)}\}
+$$&gt;&gt;&gt; def codepoint(c):
+...     return f&#34;U&#43;{ord(c):04X}&#34;
+...
+&gt;&gt;&gt; codepoint(&#39;a&#39;)
+&#39;U&#43;0061&#39;
+&gt;&gt;&gt; codepoint(&#39;吃&#39;)
+&#39;U&#43;5403&#39;
+&gt;&gt;&gt; codepoint(&#39;💩&#39;)
+&#39;U&#43;1F4A9&#39;
+In general, we can consider it as a giant table that maps each character to a unique integer, called a code point. Current Unicode 17 has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 planes, each with 65,536 code points).">
 <meta name="author" content="">
 <link rel="canonical" href="http://localhost:1313/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/">
-<link crossorigin="anonymous" href="/assets/css/stylesheet.4b72e7725c68fccaac08b7b94b4bf3724ac8531837c6717dbd3e55b5a23b0117.css" integrity="sha256-S3Lnclxo/MqsCLe5S0vzckrIUxg3xnF9vT5VtaI7ARc=" rel="preload stylesheet" as="style">
+<link crossorigin="anonymous" href="/assets/css/stylesheet.991cf697334c37efc87a5acccb14bcb025b382aeec1def2adf0d84810e1da451.css" integrity="sha256-mRz2lzNMN&#43;/IelrMyxS8sCWzgq7sHe8q3w2EgQ4dpFE=" rel="preload stylesheet" as="style">
 <link rel="icon" href="http://localhost:1313/favicon.ico">
 <link rel="icon" type="image/png" sizes="16x16" href="http://localhost:1313/favicon-16x16.png">
 <link rel="icon" type="image/png" sizes="32x32" href="http://localhost:1313/favicon-32x32.png">
@@ -165,7 +179,7 @@ In this section, we will use the Unicode Standard and train a BPE tokenizer.">
     <h1 class="post-title entry-hint-parent">
       Byte Pair Encoding
     </h1>
-    <div class="post-meta"><span title='2026-04-16 20:31:41 +0800 CST'>April 16, 2026</span>&nbsp;·&nbsp;<span>7 min</span>
+    <div class="post-meta"><span title='2026-04-16 20:31:41 +0800 CST'>April 16, 2026</span>&nbsp;·&nbsp;<span>5 min</span>
 
 </div>
   </header> <details class="toc" >
@@ -180,24 +194,35 @@ In this section, we will use the Unicode Standard and train a BPE tokenizer.">
             <li>
                 <a href="#code-points" aria-label="Code Points">Code Points</a></li>
             <li>
-                <a href="#unicode-transformation-format" aria-label="Unicode Transformation Format">Unicode Transformation Format</a></li>
-            <li>
-                <a href="#unicode-examples" aria-label="Unicode Examples">Unicode Examples</a></li></ul>
+                <a href="#unicode-transformation-format" aria-label="Unicode Transformation Format">Unicode Transformation Format</a></li></ul>
             </li>
             <li>
                 <a href="#levels-of-tokenization" aria-label="Levels of Tokenization">Levels of Tokenization</a></li>
             <li>
-                <a href="#byte-level-byte-pair-encoding-bpe" aria-label="Byte-Level Byte Pair Encoding (BPE)">Byte-Level Byte Pair Encoding (BPE)</a>
+                <a href="#byte-level-byte-pair-encoding-bpe" aria-label="Byte-Level Byte Pair Encoding (BPE)">Byte-Level Byte Pair Encoding (BPE)</a><ul>
+                    
+            <li>
+                <a href="#bpe-training" aria-label="BPE: Training">BPE: Training</a><ul>
+                    
+            <li>
+                <a href="#initialization" aria-label="Initialization">Initialization</a></li>
+            <li>
+                <a href="#pre-tokenization" aria-label="Pre-tokenization">Pre-tokenization</a></li>
+            <li>
+                <a href="#merge-iterations" aria-label="Merge Iterations">Merge Iterations</a>
             </li>
+        </ul>
+        </li>
+        </ul>
+        </li>
         </ul>
     </div>
 </details>
 
-  <div class="post-content md-content"><p>The tokenizer is a function that takes in a string as input and outputs a list of substrings, called <strong>tokens</strong>, which is the most basic unit of language modeling.</p>
-<p>Note that in a computer, a string is represented as a sequence of bytes. So before modeling a tokenizer, we need to find out how the string is encoded into bytes.</p>
+  <div class="post-content md-content"><p>Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.</p>
 <p>In this section, we will use <strong>the Unicode Standard</strong> and train a <strong>BPE</strong> tokenizer.</p>
 <h1 id="the-unicode-standard">The Unicode Standard<a hidden class="anchor" aria-hidden="true" href="#the-unicode-standard">#</a></h1>
-<p><a href="https://home.unicode.org/technical-quick-start-guide/#:~:text=The%20Unicode%20Standard%20refers%20to%20the%20standard%20character%20set%20that%20represents%20all%20natural%20language%20characters.%20Unicode%20can%20encode%20up%20to%20roughly%201.1%20million%20characters%2C%20allowing%20it%20to%20support%20all%20of%20the%20world%E2%80%99s%20languages%20and%20scripts%20in%20a%20single%2C%20universal%20standard.">The Unicode Standard</a> refers to the standard character set that represents all natural language characters. Unicode can encode up to roughly 1.1 million characters, allowing it to support all of the world’s languages and scripts in a single, universal standard.</p>
+<p><a href="https://home.unicode.org/technical-quick-start-guide/#:~:text=The%20Unicode%20Standard%20refers%20to%20the%20standard%20character%20set%20that%20represents%20all%20natural%20language%20characters.%20Unicode%20can%20encode%20up%20to%20roughly%201.1%20million%20characters%2C%20allowing%20it%20to%20support%20all%20of%20the%20world%E2%80%99s%20languages%20and%20scripts%20in%20a%20single%2C%20universal%20standard.">The Unicode Standard</a> refers to the standard character set that represents all natural language characters. Below are some important concepts.</p>
 <h2 id="code-points">Code Points<a hidden class="anchor" aria-hidden="true" href="#code-points">#</a></h2>
 $$
 \text{The Unicode Standard} = \{\text{character(char)}\} \xrightarrow{\text{encoding}} \{\text{code point(int)}\}
@@ -214,43 +239,21 @@ $$<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color
 <h2 id="unicode-transformation-format">Unicode Transformation Format<a hidden class="anchor" aria-hidden="true" href="#unicode-transformation-format">#</a></h2>
 $$
 \text{UTF} = \{\text{code point(int)}\} \xrightarrow{\text{encoding}} \{\text{byte sequence(bytes)}\}
-$$<p>It would be wasteful to encode each character with the corresponding code point, which costs 4 bytes. So we have <a href="https://unicode.org/faq/utf_bom#:~:text=(SCSU).-,Q%3A%20What%20is%20a%20UTF%3F,-A%20Unicode%20transformation">UTF</a> (Unicode Transformation Format) to save space. It is an algorithmic mapping from every Unicode code point (except <a href="https://www.unicode.org/glossary/#surrogate_code_point">surrogate code points</a>) to a unique byte sequence.</p>
-<blockquote>
-<p>Each UTF is reversible, thus every UTF supports lossless round tripping: mapping from any Unicode coded character sequence S to a sequence of bytes and back will produce S again. To ensure round tripping, a UTF mapping must have a mapping for all code points (except surrogate code points). This includes reserved or unassigned code points and the 66 noncharacters (including U+FFFE and U+FFFF). In addition to being lossless, UTFs are unique: any given coded character sequence will always result in the same sequence of bytes for a given UTF.</p>
-</blockquote>
+$$<p>It would be wasteful to encode each character with the corresponding code point, which costs 4 bytes. So we have <a href="https://unicode.org/faq/utf_bom#:~:text=(SCSU).-,Q%3A%20What%20is%20a%20UTF%3F,-A%20Unicode%20transformation">UTF</a> (Unicode Transformation Format) to save space. It is an algorithmic mapping from every Unicode code point to a unique byte sequence.</p>
 <p>There are three types of UTF algorithms:</p>
 <ul>
 <li>
-<p><a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31703">UTF-8</a>: Assigns each Unicode scalar value to an unsigned byte sequence of one to four bytes in length according to <a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G27288">table 1</a> and <a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G27506">table 2</a>.</p>
+<p><a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31703">UTF-8</a>: 1 codepoint = $1 \sim 4$ bytes</p>
 </li>
 <li>
-<p><a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31699">UTF-16</a>: Assigns 16-bit code for common characters (<code>U+0000</code> to <code>U+FFFF</code>) and assigns other characters to a surrogate pair according to the <a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G27792">table</a>.</p>
+<p><a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31699">UTF-16</a>: 1 codepoint = $2 \text{ or } 4$ bytes</p>
 </li>
 <li>
-<p><a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G28875">UTF-32</a>: Assigns each Unicode scalar value to a single unsigned 32-bit code unit with the same numeric value as the Unicode scalar value.</p>
+<p><a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G28875">UTF-32</a>: 1 codepoint = 4 bytes</p>
 </li>
 </ul>
 <p>among which UTF-8 is the most widely used encoding on the web and we will use UTF-8 throughout this assignment.</p>
-<h2 id="unicode-examples">Unicode Examples<a hidden class="anchor" aria-hidden="true" href="#unicode-examples">#</a></h2>
-<p>Here are the examples provided in the <a href="https://github.com/stanford-cs336/assignment1-basics/blob/main/cs336_assignment1_basics.pdf">writeup</a> to explain how UTF-8 encoding and decoding works in python:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> test_string <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;hello! こんにちは!&#34;</span>
-</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> utf8_encoded <span style="color:#f92672">=</span> test_string<span style="color:#f92672">.</span>encode(<span style="color:#e6db74">&#34;utf-8&#34;</span>)
-</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> print(utf8_encoded)
-</span></span><span style="display:flex;"><span><span style="color:#e6db74">b</span><span style="color:#e6db74">&#39;hello! </span><span style="color:#ae81ff">\xe3\x81\x93\xe3\x82\x93\xe3\x81\xab\xe3\x81\xa1\xe3\x81\xaf</span><span style="color:#e6db74">!&#39;</span>
-</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> print(type(utf8_encoded))
-</span></span><span style="display:flex;"><span><span style="color:#f92672">&lt;</span><span style="color:#66d9ef">class</span> <span style="color:#960050;background-color:#1e0010">&#39;</span><span style="color:#a6e22e">bytes</span><span style="color:#e6db74">&#39;&gt;</span>
-</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> <span style="color:#75715e"># Get the byte values for the encoded string (integers from 0 to 255).</span>
-</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> list(utf8_encoded)
-</span></span><span style="display:flex;"><span>[<span style="color:#ae81ff">104</span>, <span style="color:#ae81ff">101</span>, <span style="color:#ae81ff">108</span>, <span style="color:#ae81ff">108</span>, <span style="color:#ae81ff">111</span>, <span style="color:#ae81ff">33</span>, <span style="color:#ae81ff">32</span>, <span style="color:#ae81ff">227</span>, <span style="color:#ae81ff">129</span>, <span style="color:#ae81ff">147</span>, <span style="color:#ae81ff">227</span>, <span style="color:#ae81ff">130</span>, <span style="color:#ae81ff">147</span>, <span style="color:#ae81ff">227</span>, <span style="color:#ae81ff">129</span>, <span style="color:#ae81ff">171</span>, <span style="color:#ae81ff">227</span>, <span style="color:#ae81ff">129</span>,
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">161</span>, <span style="color:#ae81ff">227</span>, <span style="color:#ae81ff">129</span>, <span style="color:#ae81ff">175</span>, <span style="color:#ae81ff">33</span>]
-</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> <span style="color:#75715e"># One byte does not necessarily correspond to one Unicode character!</span>
-</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> print(len(test_string))
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>
-</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> print(len(utf8_encoded))
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">23</span>
-</span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> print(utf8_encoded<span style="color:#f92672">.</span>decode(<span style="color:#e6db74">&#34;utf-8&#34;</span>))
-</span></span><span style="display:flex;"><span>hello<span style="color:#960050;background-color:#1e0010">!</span> こんにちは<span style="color:#960050;background-color:#1e0010">!</span>
-</span></span></code></pre></div><h1 id="levels-of-tokenization">Levels of Tokenization<a hidden class="anchor" aria-hidden="true" href="#levels-of-tokenization">#</a></h1>
+<h1 id="levels-of-tokenization">Levels of Tokenization<a hidden class="anchor" aria-hidden="true" href="#levels-of-tokenization">#</a></h1>
 <figure class="align-center ">
     <img loading="lazy" src="figures/tokenization-level.png#center"
          alt="tokenization level" width="400"/> <figcaption>
@@ -258,105 +261,197 @@ $$<p>It would be wasteful to encode each character with the corresponding code p
         </figcaption>
 </figure>
 
-<p>With UTF-8 encoding, we are essentially taking a sequence of codepoints (integers in the range $0$ to $159,801$) and transforming it into a sequence of byte values (integers in the range $0$ to $255$). So basically the text input is just <strong>a list of byte values</strong>.</p>
+<p>With UTF-8 encoding, we are essentially taking a sequence of codepoints which are encoded into <strong>a sequence of bytes</strong> ($\in \{0, 1, \ldots, 255\}$).
+That&rsquo;s what&rsquo;s fed into the entire modeling pipeline.</p>
 <p>There are several ways to tokenize such kind of input, primarily based on the level of tokenization:</p>
-<ul>
-<li>
-<p><a href="https://arxiv.org/pdf/2105.13626"><strong>Byte-Level</strong></a>: If we use $0-255$ as tokens, then we do not need to worry about out-of-vocabulary tokens. But the sequence length will be much longer, which makes both training and inference more expensive.</p>
-</li>
-<li>
-<p><strong>Word-Level</strong>: If we use words as tokens, then the sequence length will be much shorter, but we need to worry about out-of-vocabulary tokens.</p>
-</li>
-<li>
-<p><strong>Subword-Level</strong>: Almost all modern language models use subword-level tokenization, which  trades-off a larger vocabulary size for better compression of the input byte sequence. Examples include BPE<a href="https://arxiv.org/pdf/1508.07909">(Sennrich et al., 2015)</a>, WordPiece<a href="https://static.googleusercontent.com/media/research.google.com/zh-CN//pubs/archive/37842.pdf">(Schuster and Nakajima, 2012)</a> and Unigram<a href="https://arxiv.org/pdf/1804.10959">(Kudo, 2018)</a>. In this assignment, we will focus on BPE.</p>
-</li>
-</ul>
+<table>
+  <thead>
+      <tr>
+          <th>Level</th>
+          <th>Definition</th>
+          <th>Pros</th>
+          <th>Cons</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><a href="https://arxiv.org/pdf/2105.13626">Byte</a></td>
+          <td>1 token = 1 byte</td>
+          <td>No OOV token</td>
+          <td>Longer seqlen</td>
+      </tr>
+      <tr>
+          <td>Word</td>
+          <td>1 token = 1 word</td>
+          <td>Shorter seqlen</td>
+          <td>Potential OOV token</td>
+      </tr>
+      <tr>
+          <td>Subword</td>
+          <td>1 byte ≤ 1 token ≤ 1 word</td>
+          <td>No OOV token and shorter seqlen</td>
+          <td>More complex training process</td>
+      </tr>
+  </tbody>
+</table>
+<p>Most LLMs nowadays use <strong>subword tokenization</strong> such as <a href="https://arxiv.org/abs/1508.07909">BPE</a>, because it gives us the best of both worlds in terms of out-of-vocabulary handling and manageable input sequence lengths</p>
 <h1 id="byte-level-byte-pair-encoding-bpe">Byte-Level Byte Pair Encoding (BPE)<a hidden class="anchor" aria-hidden="true" href="#byte-level-byte-pair-encoding-bpe">#</a></h1>
-<p>The BPE algorithm selects new subword units by <strong>iteratively merging the most frequent pair of adjacent tokens</strong> and replacing them with a new merged token. Such process of constructing the BPE tokenizer vocabulary is known
-as <strong>training</strong> the BPE tokenizer.</p>
-<p>The training process consists of several stages:</p>
-<p><strong>Initialization</strong>   For byte-level BPE, our initial vocabulary has 2 parts: 256 byte values and special tokens, including <code>&lt;|endoftext|&gt;</code>, etc.</p>
-$$
-\text{vocab} = \{0: \text{bytes}([0]), \ldots, 255: \text{bytes}([255]), 256: \text{b'<|endoftext|>'}, \ldots \}
-$$<p><strong>Pre-tokenization</strong>   The raw training data is preprocessed before training:</p>
-<ol>
-<li>
-<p>Split raw text by <strong>special tokens</strong> and we get a list of <em>documents</em>;</p>
-</li>
-<li>
-<p>Split each <em>document</em> by a given <a href="https://github.com/openai/tiktoken/pull/234/changes"><strong>regular expression</strong></a> and we get a list of <em>words</em>;</p>
-</li>
-</ol>
+<p>Subword tokenizers with vocabularies constructed via BPE are often called <strong>BPE tokenizers</strong>.
+It starts with a byte-level vocabulary and iteratively adds new subword-level tokens.</p>
+<p>A trained BPE tokenizer encodes texts like this:</p>
+<div class="image-gallery image-gallery--center " style="--gallery-cols:2;--gallery-gap:16px;--gallery-min:220px;">
+<figure class="image-gallery__item "><img loading="lazy" src="figures/bpe-text.png" alt="bpe text"/><figcaption><p>An example of BPE encoding from <a href="https://platform.openai.com/tokenizer">tiktoken</a></p></figcaption></figure>
+
+<figure class="image-gallery__item "><img loading="lazy" src="figures/bpe-tokenids.png" alt="bpe token ids"/><figcaption><p>BPE token IDs</p></figcaption></figure>
+
+</div>
+
+<p>It consists of 3 essential parts:</p>
 <ul>
 <li>
-<p>We first split by special tokens because they should never be split into multiple tokens and they will always be preserved as a single token.</p>
+<p><code>token2id: dict[Token, int]</code>: a mapping from <strong>token</strong> to <strong>token id</strong></p>
 </li>
 <li>
-<p>We drop special tokens during BPE training, but we need to keep them in the encoding method because they should also be converted into token ids and feed to the model.</p>
+<p><code>id2token: dict[int, Token]</code>: a mapping from <strong>token id</strong> to <strong>token</strong></p>
 </li>
 <li>
-<p>I introduce the terms <em>document</em> and <em>word</em> here just for better explanation.</p>
+<p><code>merges: list[tuple[Token, Token]]</code>: a list of merges produced during training ordered by order of creation.</p>
 </li>
 </ul>
-<figure class="align-center ">
-    <img loading="lazy" src="figures/pre-tokenize.png#center"
-         alt="pre-tokenization" width="400"/> <figcaption>
-            <p>An example of pre-tokenization</p>
-        </figcaption>
-</figure>
-
 
           <link rel="stylesheet" href="/css/vendors/admonitions.css">
-    <div class="admonition tip">
-      <div class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><path d="M272 384c9.6-31.9 29.5-59.1 49.2-86.2c0 0 0 0 0 0c5.2-7.1 10.4-14.2 15.4-21.4c19.8-28.5 31.4-63 31.4-100.3C368 78.8 289.2 0 192 0S16 78.8 16 176c0 37.3 11.6 71.9 31.4 100.3c5 7.2 10.2 14.3 15.4 21.4c0 0 0 0 0 0c19.8 27.1 39.7 54.4 49.2 86.2l160 0zM192 512c44.2 0 80-35.8 80-80l0-16-160 0 0 16c0 44.2 35.8 80 80 80zM112 176c0 8.8-7.2 16-16 16s-16-7.2-16-16c0-61.9 50.1-112 112-112c8.8 0 16 7.2 16 16s-7.2 16-16 16c-44.2 0-80 35.8-80 80z"/></svg>
-        <span>Why pre-tokenize with regular expression?</span>
+    <div class="admonition note">
+      <div class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span>Type Alias</span>
       </div>
       <div class="admonition-content">
-        <p>Once you have a vocabulary, you could, in principle, count how often bytes occur next to each other in your text and begin merging them starting with the most frequent pair of bytes. However, this is quite computationally expensive, since we’d have to take a full pass over the corpus each time we merge. In addition, directly merging bytes across the corpus may result in tokens that differ only in punctuation (e.g., dog! vs. dog.). These tokens would get completely different token IDs, even though they are likely to have high semantic similarity (since they differ only in punctuation). To avoid this, we pre-tokenize the corpus. You can think of this as a coarse-grained tokenization over the corpus that helps us count how often pairs of characters appear. For example, the word &rsquo;text&rsquo; might be a pre-token that appears 10 times. In this case, when we count how often the characters ‘t’ and ‘e’ appear next to each other, we will see that the word ‘text’ has ‘t’ and ‘e’ adjacent and we can increment their count by 10 instead of looking through the corpus. Since we’re training a byte-level BPE model, each pretoken is represented as a sequence of UTF-8 bytes.</p>
+        <p>I use <code>Token = bytes</code> as a type alias.</p>
       </div>
-    </div><p><strong>Compute BPE Merges</strong>   At merge stage, we repeat the following steps until we have the desired vocabulary size:</p>
+    </div><p>The training process is the process of learning the tokens and merges from the training data.</p>
+<h2 id="bpe-training">BPE: Training<a hidden class="anchor" aria-hidden="true" href="#bpe-training">#</a></h2>
+<p>We can divide BPE training into three stages below.</p>
+<h3 id="initialization">Initialization<a hidden class="anchor" aria-hidden="true" href="#initialization">#</a></h3>
+<p>BPE initializes the vocabulary with special tokens and 256 byte values.
+The merges list is initialized as an empty list.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>token2id, id2token <span style="color:#f92672">=</span> {}, {}
+</span></span><span style="display:flex;"><span>merges <span style="color:#f92672">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">for</span> special_token <span style="color:#f92672">in</span> special_tokens:
+</span></span><span style="display:flex;"><span>    token <span style="color:#f92672">=</span> special_token<span style="color:#f92672">.</span>encode(<span style="color:#e6db74">&#34;utf-8&#34;</span>)
+</span></span><span style="display:flex;"><span>    token2id[token] <span style="color:#f92672">=</span> len(token2id)
+</span></span><span style="display:flex;"><span>    id2token[len(id2token)] <span style="color:#f92672">=</span> token
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">for</span> i <span style="color:#f92672">in</span> range(<span style="color:#ae81ff">256</span>):
+</span></span><span style="display:flex;"><span>    token <span style="color:#f92672">=</span> bytes([i])
+</span></span><span style="display:flex;"><span>    token2id[token] <span style="color:#f92672">=</span> len(token2id)
+</span></span><span style="display:flex;"><span>    id2token[len(id2token)] <span style="color:#f92672">=</span> token
+</span></span></code></pre></div><h3 id="pre-tokenization">Pre-tokenization<a hidden class="anchor" aria-hidden="true" href="#pre-tokenization">#</a></h3>
+<p>This pre-tokenization stage could be generally considered as a coarse-grained tokenization over the corpus that helps us count how often pairs of tokens appear.</p>
+<p>It has two steps:</p>
 <ol>
 <li>
-<p>Find <strong>the most frequent</strong> token pair in the training data;</p>
+<p>Split by <strong>special tokens</strong>: we do not want to split special tokens;</p>
 </li>
 <li>
-<p><strong>Merge</strong> the most frequent token pair into a new token and add it to the vocabulary;</p>
-</li>
-<li>
-<p><strong>Update</strong> the training data by replacing all occurrences of the merged token pair with the new token, then go to step 1.</p>
+<p>Split by a given <a href="https://github.com/openai/tiktoken/pull/234/changes"><strong>regular expression</strong></a>: this works better than <code>.split(' ')</code>;</p>
 </li>
 </ol>
-<ul>
-<li>
-<p>We count pairs within <em>words</em> and we do not count cross-word token pairs for efficiency.</p>
-</li>
-<li>
-<p>We deterministically break ties in pair frequency by preferring <strong>the lexicographically greater pair</strong>.</p>
-</li>
-</ul>
 
-    <div class="admonition tip">
-      <div class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><path d="M272 384c9.6-31.9 29.5-59.1 49.2-86.2c0 0 0 0 0 0c5.2-7.1 10.4-14.2 15.4-21.4c19.8-28.5 31.4-63 31.4-100.3C368 78.8 289.2 0 192 0S16 78.8 16 176c0 37.3 11.6 71.9 31.4 100.3c5 7.2 10.2 14.3 15.4 21.4c0 0 0 0 0 0c19.8 27.1 39.7 54.4 49.2 86.2l160 0zM192 512c44.2 0 80-35.8 80-80l0-16-160 0 0 16c0 44.2 35.8 80 80 80zM112 176c0 8.8-7.2 16-16 16s-16-7.2-16-16c0-61.9 50.1-112 112-112c8.8 0 16 7.2 16 16s-7.2 16-16 16c-44.2 0-80 35.8-80 80z"/></svg>
-        <span>Word Boundaries</span>
+    <div class="admonition note">
+      <div class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span>Terminology</span>
       </div>
       <div class="admonition-content">
-        <p>The original BPE formulation specifies the inclusion of an end-of-word token. We do not add an end-of-word-token when training byte-level BPE models because all bytes (including whitespace and punctuation) are included in the model’s vocabulary. Since we’re explicitly representing spaces and punctuation, the learned BPE merges will naturally reflect these word boundaries.
-For example, in original BPE:</p>
+        <p>For better consistency and clearness, I introduce the terms:</p>
+<ul>
+<li><em>document</em>: the text after splitting by special tokens;</li>
+<li><em>word</em>: the text after splitting by regular expression.</li>
+</ul>
+      </div>
+    </div><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#f92672">import</span> regex <span style="color:#66d9ef">as</span> re
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">split_by_special_tokens</span>(text, special_tokens):
+</span></span><span style="display:flex;"><span>    pattern <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;|&#34;</span><span style="color:#f92672">.</span>join(re<span style="color:#f92672">.</span>escape(token) <span style="color:#66d9ef">for</span> token <span style="color:#f92672">in</span> special_tokens)
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e"># note that the special tokens will be dropped in the output of re.split</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e"># because we don&#39;t need them for training.</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">return</span> re<span style="color:#f92672">.</span>split(pattern, text)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">split_by_regex</span>(text, pattern):
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">return</span> re<span style="color:#f92672">.</span>findall(pattern, text)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>text <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;&#34;&#34;low low lower lowest&lt;|endoftext|&gt;high high higher highest&#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span>PAT <span style="color:#f92672">=</span> <span style="color:#e6db74">r</span><span style="color:#e6db74">&#34;&#34;&#34;&#39;(?:[sdmt]|ll|ve|re)| ?\p</span><span style="color:#e6db74">{L}</span><span style="color:#e6db74">+| ?\p</span><span style="color:#e6db74">{N}</span><span style="color:#e6db74">+| ?[^\s\p</span><span style="color:#e6db74">{L}</span><span style="color:#e6db74">\p</span><span style="color:#e6db74">{N}</span><span style="color:#e6db74">]+|\s+(?!\S)|\s+&#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span>special_tokens <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;&lt;|endoftext|&gt;&#34;</span>]
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>documents <span style="color:#f92672">=</span> split_by_special_tokens(text, special_tokens)
+</span></span><span style="display:flex;"><span>print(documents)
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># output:</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># [&#39;low low lower lowest&#39;, &#39;high high higher highest&#39;]</span>
+</span></span><span style="display:flex;"><span>words <span style="color:#f92672">=</span> [word <span style="color:#66d9ef">for</span> document <span style="color:#f92672">in</span> documents <span style="color:#66d9ef">for</span> word <span style="color:#f92672">in</span> split_by_regex(document, PAT)]
+</span></span><span style="display:flex;"><span>print(words)
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># output:</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># [&#39;low&#39;, &#39; low&#39;, &#39; lower&#39;, &#39; lowest&#39;, &#39;high&#39;, &#39; high&#39;, &#39; higher&#39;, &#39; highest&#39;]</span>
+</span></span></code></pre></div>
+    <div class="admonition note">
+      <div class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span>Why pre-tokenize?</span>
+      </div>
+      <div class="admonition-content">
+        <p>It has several advantages:</p>
 <ul>
 <li>
-<p>Original data: <code>apple</code>, <code>apple pie</code>, <code>apples</code></p>
+<p><strong>Improves training efficiency</strong>: you can count the appearance of a <em>word</em>, then count pairs within the <em>word</em> and multiply by the word count, which is much more efficient than looking through the entire corpus for each pair;</p>
 </li>
 <li>
-<p>Tokens without <code>&lt;/w&gt;</code>: <code>a p p l e</code>, <code>p i e</code>, <code>a p p l e s</code></p>
-</li>
-<li>
-<p>New token: <code>apple</code></p>
+<p><strong>Avoids different token ids for highly semantically similar tokens</strong> (e.g. <code>dog!</code> vs. <code>dog.</code>): this is controlled by the regular expression;</p>
 </li>
 </ul>
-<p>Then we can not tell whether <code>apple</code> is a single word or a prefix of <code>apples</code>. So <code>&lt;/w&gt;</code> is needed to tell the difference between <code>apple</code> and <code>apple&lt;/w&gt;</code>.
-However, in byte-level BPE, whitespace and punctuation are preserved in the token, so the word boundaries are naturally reflected.</p>
       </div>
-    </div>
+    </div><h3 id="merge-iterations">Merge Iterations<a hidden class="anchor" aria-hidden="true" href="#merge-iterations">#</a></h3>
+<p>This is the core of the training process: <strong>we iteratively pick the most frequent token pair and merge it into a new token until we reach the desired vocabulary size.</strong></p>
+<p>After pre-tokenization, we get a giant list of <em>words</em>. For faster training, we can compress the <em>words</em> into a dictionary:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">compress</span>(words):
+</span></span><span style="display:flex;"><span>    corpus <span style="color:#f92672">=</span> {}
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">for</span> word <span style="color:#f92672">in</span> words:
+</span></span><span style="display:flex;"><span>        tokens <span style="color:#f92672">=</span> tuple([bytes([w]) <span style="color:#66d9ef">for</span> w <span style="color:#f92672">in</span> word<span style="color:#f92672">.</span>encode(<span style="color:#e6db74">&#34;utf-8&#34;</span>)])
+</span></span><span style="display:flex;"><span>        corpus[tokens] <span style="color:#f92672">=</span> corpus<span style="color:#f92672">.</span>get(tokens, <span style="color:#ae81ff">0</span>) <span style="color:#f92672">+</span> <span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">return</span> corpus
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>corpus <span style="color:#f92672">=</span> compress(words)
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># output:</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># {</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">#     (b&#34; &#34;, b&#34;h&#34;, b&#34;i&#34;, b&#34;g&#34;, b&#34;h&#34;): 1,</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">#     (b&#34; &#34;, b&#34;h&#34;, b&#34;i&#34;, b&#34;g&#34;, b&#34;h&#34;, b&#34;e&#34;, b&#34;r&#34;): 1,</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">#     (b&#34; &#34;, b&#34;h&#34;, b&#34;i&#34;, b&#34;g&#34;, b&#34;h&#34;, b&#34;e&#34;, b&#34;s&#34;, b&#34;t&#34;): 1,</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">#     (b&#34; &#34;, b&#34;l&#34;, b&#34;o&#34;, b&#34;w&#34;): 1,</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">#     (b&#34; &#34;, b&#34;l&#34;, b&#34;o&#34;, b&#34;w&#34;, b&#34;e&#34;, b&#34;r&#34;): 1,</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">#     (b&#34; &#34;, b&#34;l&#34;, b&#34;o&#34;, b&#34;w&#34;, b&#34;e&#34;, b&#34;s&#34;, b&#34;t&#34;): 1,</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">#     (b&#34;h&#34;, b&#34;i&#34;, b&#34;g&#34;, b&#34;h&#34;): 1,</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">#     (b&#34;l&#34;, b&#34;o&#34;, b&#34;w&#34;): 1,</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># }</span>
+</span></span></code></pre></div><p>Then the training loop is like:</p>
+<ol>
+<li>
+<p>Find the most frequent pair in the corpus:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>(token1, token2) <span style="color:#f92672">=</span> get_most_frequent_pair(corpus)
+</span></span></code></pre></div></li>
+<li>
+<p>Add the new merged token to the vocabulary and update the merges list:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>new_token <span style="color:#f92672">=</span> token1 <span style="color:#f92672">+</span> token2
+</span></span><span style="display:flex;"><span>add_token(token2id, id2token, new_token)
+</span></span><span style="display:flex;"><span>add_merge(merges, token1, token2)
+</span></span></code></pre></div></li>
+<li>
+<p>Update the corpus by replacing all occurrences of the merged pair with the new token:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>corpus <span style="color:#f92672">=</span> update_corpus(corpus, token1, token2)
+</span></span></code></pre></div></li>
+<li>
+<p>Repeat until we reach the desired vocabulary size.</p>
+</li>
+</ol>
+
 
   </div>
 
