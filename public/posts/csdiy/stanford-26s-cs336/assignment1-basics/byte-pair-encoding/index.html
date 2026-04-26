@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en" dir=" auto" data-theme="auto">
 
-<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
+<head>
     
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
 
@@ -19,7 +19,7 @@
     <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<meta name="robots" content="noindex, nofollow">
+<meta name="robots" content="index, follow">
 <title>Byte Pair Encoding | trytry&#39;s blog</title>
 <meta name="keywords" content="">
 <meta name="description" content="Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.
@@ -40,16 +40,16 @@ $$&gt;&gt;&gt; def codepoint(c):
 &#39;U&#43;1F4A9&#39;
 In general, we can consider it as a giant table that maps each character to a unique integer, called a code point. Current Unicode 17 has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 planes, each with 65,536 code points).">
 <meta name="author" content="">
-<link rel="canonical" href="http://localhost:1313/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/">
+<link rel="canonical" href="https://aoblex.github.io/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/">
 <link crossorigin="anonymous" href="/assets/css/stylesheet.991cf697334c37efc87a5acccb14bcb025b382aeec1def2adf0d84810e1da451.css" integrity="sha256-mRz2lzNMN&#43;/IelrMyxS8sCWzgq7sHe8q3w2EgQ4dpFE=" rel="preload stylesheet" as="style">
-<link rel="icon" href="http://localhost:1313/favicon.ico">
-<link rel="icon" type="image/png" sizes="16x16" href="http://localhost:1313/favicon-16x16.png">
-<link rel="icon" type="image/png" sizes="32x32" href="http://localhost:1313/favicon-32x32.png">
-<link rel="apple-touch-icon" href="http://localhost:1313/apple-touch-icon.png">
-<link rel="mask-icon" href="http://localhost:1313/safari-pinned-tab.svg">
+<link rel="icon" href="https://aoblex.github.io/favicon.ico">
+<link rel="icon" type="image/png" sizes="16x16" href="https://aoblex.github.io/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="https://aoblex.github.io/favicon-32x32.png">
+<link rel="apple-touch-icon" href="https://aoblex.github.io/apple-touch-icon.png">
+<link rel="mask-icon" href="https://aoblex.github.io/safari-pinned-tab.svg">
 <meta name="theme-color" content="#2e2e33">
 <meta name="msapplication-TileColor" content="#2e2e33">
-<link rel="alternate" hreflang="en" href="http://localhost:1313/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/">
+<link rel="alternate" hreflang="en" href="https://aoblex.github.io/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/">
 <noscript>
     <style>
         #theme-toggle,
@@ -95,6 +95,93 @@ In general, we can consider it as a giant table that maps each character to a un
         document.querySelector("html").dataset.theme = 'light';
     }
 
+</script><meta property="og:url" content="https://aoblex.github.io/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/">
+  <meta property="og:site_name" content="trytry&#39;s blog">
+  <meta property="og:title" content="Byte Pair Encoding">
+  <meta property="og:description" content="Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.
+In this section, we will use the Unicode Standard and train a BPE tokenizer.
+The Unicode Standard The Unicode Standard refers to the standard character set that represents all natural language characters. Below are some important concepts.
+Code Points $$ \text{The Unicode Standard} = \{\text{character(char)}\} \xrightarrow{\text{encoding}} \{\text{code point(int)}\} $$&gt;&gt;&gt; def codepoint(c): ... return f&#34;U&#43;{ord(c):04X}&#34; ... &gt;&gt;&gt; codepoint(&#39;a&#39;) &#39;U&#43;0061&#39; &gt;&gt;&gt; codepoint(&#39;吃&#39;) &#39;U&#43;5403&#39; &gt;&gt;&gt; codepoint(&#39;💩&#39;) &#39;U&#43;1F4A9&#39; In general, we can consider it as a giant table that maps each character to a unique integer, called a code point. Current Unicode 17 has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 planes, each with 65,536 code points).">
+  <meta property="og:locale" content="en">
+  <meta property="og:type" content="article">
+    <meta property="article:section" content="posts">
+    <meta property="article:published_time" content="2026-04-16T20:31:41+08:00">
+    <meta property="article:modified_time" content="2026-04-16T20:31:41+08:00">
+
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Byte Pair Encoding">
+  <meta name="twitter:description" content="Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.
+In this section, we will use the Unicode Standard and train a BPE tokenizer.
+The Unicode Standard The Unicode Standard refers to the standard character set that represents all natural language characters. Below are some important concepts.
+Code Points $$ \text{The Unicode Standard} = \{\text{character(char)}\} \xrightarrow{\text{encoding}} \{\text{code point(int)}\} $$&gt;&gt;&gt; def codepoint(c): ... return f&#34;U&#43;{ord(c):04X}&#34; ... &gt;&gt;&gt; codepoint(&#39;a&#39;) &#39;U&#43;0061&#39; &gt;&gt;&gt; codepoint(&#39;吃&#39;) &#39;U&#43;5403&#39; &gt;&gt;&gt; codepoint(&#39;💩&#39;) &#39;U&#43;1F4A9&#39; In general, we can consider it as a giant table that maps each character to a unique integer, called a code point. Current Unicode 17 has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 planes, each with 65,536 code points).">
+
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position":  1 ,
+      "name": "Posts",
+      "item": "https://aoblex.github.io/posts/"
+    }, 
+    {
+      "@type": "ListItem",
+      "position":  2 ,
+      "name": "CSDIY",
+      "item": "https://aoblex.github.io/posts/csdiy/"
+    }, 
+    {
+      "@type": "ListItem",
+      "position":  3 ,
+      "name": "CS336: Language Modeling from Scratch (Spring 2026)",
+      "item": "https://aoblex.github.io/posts/csdiy/stanford-26s-cs336/"
+    }, 
+    {
+      "@type": "ListItem",
+      "position":  4 ,
+      "name": "Assignment 1: Basics",
+      "item": "https://aoblex.github.io/posts/csdiy/stanford-26s-cs336/assignment1-basics/"
+    }, 
+    {
+      "@type": "ListItem",
+      "position":  5 ,
+      "name": "Byte Pair Encoding",
+      "item": "https://aoblex.github.io/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/"
+    }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Byte Pair Encoding",
+  "name": "Byte Pair Encoding",
+  "description": "Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.\nIn this section, we will use the Unicode Standard and train a BPE tokenizer.\nThe Unicode Standard The Unicode Standard refers to the standard character set that represents all natural language characters. Below are some important concepts.\nCode Points $$ \\text{The Unicode Standard} = \\{\\text{character(char)}\\} \\xrightarrow{\\text{encoding}} \\{\\text{code point(int)}\\} $$\u0026gt;\u0026gt;\u0026gt; def codepoint(c): ... return f\u0026#34;U+{ord(c):04X}\u0026#34; ... \u0026gt;\u0026gt;\u0026gt; codepoint(\u0026#39;a\u0026#39;) \u0026#39;U+0061\u0026#39; \u0026gt;\u0026gt;\u0026gt; codepoint(\u0026#39;吃\u0026#39;) \u0026#39;U+5403\u0026#39; \u0026gt;\u0026gt;\u0026gt; codepoint(\u0026#39;💩\u0026#39;) \u0026#39;U+1F4A9\u0026#39; In general, we can consider it as a giant table that maps each character to a unique integer, called a code point. Current Unicode 17 has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 planes, each with 65,536 code points).\n",
+  "keywords": [
+    
+  ],
+  "articleBody": "Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.\nIn this section, we will use the Unicode Standard and train a BPE tokenizer.\nThe Unicode Standard The Unicode Standard refers to the standard character set that represents all natural language characters. Below are some important concepts.\nCode Points $$ \\text{The Unicode Standard} = \\{\\text{character(char)}\\} \\xrightarrow{\\text{encoding}} \\{\\text{code point(int)}\\} $$\u003e\u003e\u003e def codepoint(c): ... return f\"U+{ord(c):04X}\" ... \u003e\u003e\u003e codepoint('a') 'U+0061' \u003e\u003e\u003e codepoint('吃') 'U+5403' \u003e\u003e\u003e codepoint('💩') 'U+1F4A9' In general, we can consider it as a giant table that maps each character to a unique integer, called a code point. Current Unicode 17 has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 planes, each with 65,536 code points).\nUnicode Transformation Format $$ \\text{UTF} = \\{\\text{code point(int)}\\} \\xrightarrow{\\text{encoding}} \\{\\text{byte sequence(bytes)}\\} $$It would be wasteful to encode each character with the corresponding code point, which costs 4 bytes. So we have UTF (Unicode Transformation Format) to save space. It is an algorithmic mapping from every Unicode code point to a unique byte sequence.\nThere are three types of UTF algorithms:\nUTF-8: 1 codepoint = $1 \\sim 4$ bytes\nUTF-16: 1 codepoint = $2 \\text{ or } 4$ bytes\nUTF-32: 1 codepoint = 4 bytes\namong which UTF-8 is the most widely used encoding on the web and we will use UTF-8 throughout this assignment.\nLevels of Tokenization tokenization level\nWith UTF-8 encoding, we are essentially taking a sequence of codepoints which are encoded into a sequence of bytes ($\\in \\{0, 1, \\ldots, 255\\}$). That’s what’s fed into the entire modeling pipeline.\nThere are several ways to tokenize such kind of input, primarily based on the level of tokenization:\nLevel Definition Pros Cons Byte 1 token = 1 byte No OOV token Longer seqlen Word 1 token = 1 word Shorter seqlen Potential OOV token Subword 1 byte ≤ 1 token ≤ 1 word No OOV token and shorter seqlen More complex training process Most LLMs nowadays use subword tokenization such as BPE, because it gives us the best of both worlds in terms of out-of-vocabulary handling and manageable input sequence lengths\nByte-Level Byte Pair Encoding (BPE) Subword tokenizers with vocabularies constructed via BPE are often called BPE tokenizers. It starts with a byte-level vocabulary and iteratively adds new subword-level tokens.\nA trained BPE tokenizer encodes texts like this:\nAn example of BPE encoding from tiktoken\nBPE token IDs\nIt consists of 3 essential parts:\ntoken2id: dict[Token, int]: a mapping from token to token id\nid2token: dict[int, Token]: a mapping from token id to token\nmerges: list[tuple[Token, Token]]: a list of merges produced during training ordered by order of creation.\nType Alias I use Token = bytes as a type alias.\nThe training process is the process of learning the tokens and merges from the training data.\nBPE: Training We can divide BPE training into three stages below.\nInitialization BPE initializes the vocabulary with special tokens and 256 byte values. The merges list is initialized as an empty list.\ntoken2id, id2token = {}, {} merges = [] for special_token in special_tokens: token = special_token.encode(\"utf-8\") token2id[token] = len(token2id) id2token[len(id2token)] = token for i in range(256): token = bytes([i]) token2id[token] = len(token2id) id2token[len(id2token)] = token Pre-tokenization This pre-tokenization stage could be generally considered as a coarse-grained tokenization over the corpus that helps us count how often pairs of tokens appear.\nIt has two steps:\nSplit by special tokens: we do not want to split special tokens;\nSplit by a given regular expression: this works better than .split(' ');\nTerminology For better consistency and clearness, I introduce the terms:\ndocument: the text after splitting by special tokens; word: the text after splitting by regular expression. import regex as re def split_by_special_tokens(text, special_tokens): pattern = \"|\".join(re.escape(token) for token in special_tokens) # note that the special tokens will be dropped in the output of re.split # because we don't need them for training. return re.split(pattern, text) def split_by_regex(text, pattern): return re.findall(pattern, text) text = \"\"\"low low lower lowest\u003c|endoftext|\u003ehigh high higher highest\"\"\" PAT = r\"\"\"'(?:[sdmt]|ll|ve|re)| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+\"\"\" special_tokens = [\"\u003c|endoftext|\u003e\"] documents = split_by_special_tokens(text, special_tokens) print(documents) # output: # ['low low lower lowest', 'high high higher highest'] words = [word for document in documents for word in split_by_regex(document, PAT)] print(words) # output: # ['low', ' low', ' lower', ' lowest', 'high', ' high', ' higher', ' highest'] Why pre-tokenize? It has several advantages:\nImproves training efficiency: you can count the appearance of a word, then count pairs within the word and multiply by the word count, which is much more efficient than looking through the entire corpus for each pair;\nAvoids different token ids for highly semantically similar tokens (e.g. dog! vs. dog.): this is controlled by the regular expression;\nMerge Iterations This is the core of the training process: we iteratively pick the most frequent token pair and merge it into a new token until we reach the desired vocabulary size.\nAfter pre-tokenization, we get a giant list of words. For faster training, we can compress the words into a dictionary:\ndef compress(words): corpus = {} for word in words: tokens = tuple([bytes([w]) for w in word.encode(\"utf-8\")]) corpus[tokens] = corpus.get(tokens, 0) + 1 return corpus corpus = compress(words) # output: # { # (b\" \", b\"h\", b\"i\", b\"g\", b\"h\"): 1, # (b\" \", b\"h\", b\"i\", b\"g\", b\"h\", b\"e\", b\"r\"): 1, # (b\" \", b\"h\", b\"i\", b\"g\", b\"h\", b\"e\", b\"s\", b\"t\"): 1, # (b\" \", b\"l\", b\"o\", b\"w\"): 1, # (b\" \", b\"l\", b\"o\", b\"w\", b\"e\", b\"r\"): 1, # (b\" \", b\"l\", b\"o\", b\"w\", b\"e\", b\"s\", b\"t\"): 1, # (b\"h\", b\"i\", b\"g\", b\"h\"): 1, # (b\"l\", b\"o\", b\"w\"): 1, # } Then the training loop is like:\nFind the most frequent pair in the corpus:\n(token1, token2) = get_most_frequent_pair(corpus) Add the new merged token to the vocabulary and update the merges list:\nnew_token = token1 + token2 add_token(token2id, id2token, new_token) add_merge(merges, token1, token2) Update the corpus by replacing all occurrences of the merged pair with the new token:\ncorpus = update_corpus(corpus, token1, token2) Repeat until we reach the desired vocabulary size.\n",
+  "wordCount" : "1029",
+  "inLanguage": "en",
+  "datePublished": "2026-04-16T20:31:41+08:00",
+  "dateModified": "2026-04-16T20:31:41+08:00",
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://aoblex.github.io/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "trytry's blog",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://aoblex.github.io/favicon.ico"
+    }
+  }
+}
 </script>
 </head>
 
@@ -102,7 +189,7 @@ In general, we can consider it as a giant table that maps each character to a un
         <header class="header">
     <nav class="header-nav">
         <div class="logo">
-            <a href="http://localhost:1313/" accesskey="h" title="trytry&#39;s blog (Alt + H)">trytry&#39;s blog</a>
+            <a href="https://aoblex.github.io/" accesskey="h" title="trytry&#39;s blog (Alt + H)">trytry&#39;s blog</a>
             <div class="logo-switches">
                 <button id="theme-toggle" class="theme-toggle" accesskey="t" title="(Alt + T)" aria-label="Toggle theme">
                     <svg class="moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
@@ -128,22 +215,22 @@ In general, we can consider it as a giant table that maps each character to a un
         </div>
         <ul id="menu" class="menu">
             <li>
-                <a href="http://localhost:1313/posts/" title="Posts">
+                <a href="https://aoblex.github.io/posts/" title="Posts">
                     <span>Posts</span>
                 </a>
             </li>
             <li>
-                <a href="http://localhost:1313/archives/" title="Archives">
+                <a href="https://aoblex.github.io/archives/" title="Archives">
                     <span>Archives</span>
                 </a>
             </li>
             <li>
-                <a href="http://localhost:1313/search/" title="Search (Alt &#43; /)" accesskey=/>
+                <a href="https://aoblex.github.io/search/" title="Search (Alt &#43; /)" accesskey=/>
                     <span>Search</span>
                 </a>
             </li>
             <li>
-                <a href="http://localhost:1313/about/" title="About">
+                <a href="https://aoblex.github.io/about/" title="About">
                     <span>About</span>
                 </a>
             </li>
@@ -155,27 +242,27 @@ In general, we can consider it as a giant table that maps each character to a un
 <article class="post-single">
   <header class="post-header">
     <nav class="breadcrumbs" role="navigation" aria-label="Breadcrumb">
-    <a href='http://localhost:1313/'>Home</a>
+    <a href='https://aoblex.github.io/'>Home</a>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
                 <polyline points="9 18 15 12 9 6"></polyline>
             </svg>
-            <a href="http://localhost:1313/posts/">Posts</a>
+            <a href="https://aoblex.github.io/posts/">Posts</a>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
                 <polyline points="9 18 15 12 9 6"></polyline>
             </svg>
-            <a href="http://localhost:1313/posts/csdiy/">CSDIY</a>
+            <a href="https://aoblex.github.io/posts/csdiy/">CSDIY</a>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
                 <polyline points="9 18 15 12 9 6"></polyline>
             </svg>
-            <a href="http://localhost:1313/posts/csdiy/stanford-26s-cs336/">CS336: Language Modeling from Scratch (Spring 2026)</a>
+            <a href="https://aoblex.github.io/posts/csdiy/stanford-26s-cs336/">CS336: Language Modeling from Scratch (Spring 2026)</a>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
                 <polyline points="9 18 15 12 9 6"></polyline>
             </svg>
-            <a href="http://localhost:1313/posts/csdiy/stanford-26s-cs336/assignment1-basics/">Assignment 1: Basics</a></nav>
+            <a href="https://aoblex.github.io/posts/csdiy/stanford-26s-cs336/assignment1-basics/">Assignment 1: Basics</a></nav>
     <h1 class="post-title entry-hint-parent">
       Byte Pair Encoding
     </h1>
@@ -319,7 +406,7 @@ It starts with a byte-level vocabulary and iteratively adds new subword-level to
 </li>
 </ul>
 
-          <link rel="stylesheet" href="/css/vendors/admonitions.css">
+            <link rel="stylesheet" href="/css/vendors/admonitions.53cd9f8afa9d9a8ac09093f668df057bc6d0f4bbd0886f39991a7b99934a7432.css" integrity="sha256-U82fivqdmorAkJP2aN8Fe8bQ9LvQiG85mRp7mZNKdDI=" crossorigin="anonymous">
     <div class="admonition note">
       <div class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
         <span>Type Alias</span>
@@ -464,7 +551,7 @@ The merges list is initialized as an empty list.</p>
         </main>
         
 <footer class="footer">
-        <span>&copy; 2026 <a href="http://localhost:1313/">trytry&#39;s blog</a></span> · 
+        <span>&copy; 2026 <a href="https://aoblex.github.io/">trytry&#39;s blog</a></span> · 
 
     <span>
         Powered by

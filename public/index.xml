@@ -1,25 +1,41 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
-    <title></title>
-    <link>//localhost:1313/</link>
-    <description>Recent content on </description>
+    <title>trytry&#39;s blog</title>
+    <link>https://aoblex.github.io/</link>
+    <description>Recent content on trytry&#39;s blog</description>
     <generator>Hugo</generator>
     <language>en</language>
     <lastBuildDate>Thu, 16 Apr 2026 20:31:41 +0800</lastBuildDate>
-    <atom:link href="//localhost:1313/index.xml" rel="self" type="application/rss+xml" />
+    <atom:link href="https://aoblex.github.io/index.xml" rel="self" type="application/rss+xml" />
     <item>
       <title>Byte Pair Encoding</title>
-      <link>//localhost:1313/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/</link>
+      <link>https://aoblex.github.io/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/</link>
       <pubDate>Thu, 16 Apr 2026 20:31:41 +0800</pubDate>
-      <guid>//localhost:1313/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/</guid>
-      <description>&lt;p&gt;The tokenizer is a function that takes in a string as input and outputs a list of substrings, called &lt;strong&gt;tokens&lt;/strong&gt;, which is the most basic unit of language modeling.&lt;/p&gt;&#xA;&lt;p&gt;Note that in a computer, a string is represented as a sequence of bytes. So before modeling a tokenizer, we need to find out how the string is encoded into bytes.&lt;/p&gt;&#xA;&lt;p&gt;In this section, we will use &lt;strong&gt;the Unicode Standard&lt;/strong&gt; and train a &lt;strong&gt;BPE&lt;/strong&gt; tokenizer.&lt;/p&gt;</description>
+      <guid>https://aoblex.github.io/posts/csdiy/stanford-26s-cs336/assignment1-basics/byte-pair-encoding/</guid>
+      <description>&lt;p&gt;Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.&lt;/p&gt;
+&lt;p&gt;In this section, we will use &lt;strong&gt;the Unicode Standard&lt;/strong&gt; and train a &lt;strong&gt;BPE&lt;/strong&gt; tokenizer.&lt;/p&gt;
+&lt;h1 id=&#34;the-unicode-standard&#34;&gt;The Unicode Standard&lt;/h1&gt;
+&lt;p&gt;&lt;a href=&#34;https://home.unicode.org/technical-quick-start-guide/#:~:text=The%20Unicode%20Standard%20refers%20to%20the%20standard%20character%20set%20that%20represents%20all%20natural%20language%20characters.%20Unicode%20can%20encode%20up%20to%20roughly%201.1%20million%20characters%2C%20allowing%20it%20to%20support%20all%20of%20the%20world%E2%80%99s%20languages%20and%20scripts%20in%20a%20single%2C%20universal%20standard.&#34;&gt;The Unicode Standard&lt;/a&gt; refers to the standard character set that represents all natural language characters. Below are some important concepts.&lt;/p&gt;
+&lt;h2 id=&#34;code-points&#34;&gt;Code Points&lt;/h2&gt;
+$$
+\text{The Unicode Standard} = \{\text{character(char)}\} \xrightarrow{\text{encoding}} \{\text{code point(int)}\}
+$$&lt;div class=&#34;highlight&#34;&gt;&lt;pre tabindex=&#34;0&#34; style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;&lt;span style=&#34;color:#f92672&#34;&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; &lt;span style=&#34;color:#66d9ef&#34;&gt;def&lt;/span&gt; &lt;span style=&#34;color:#a6e22e&#34;&gt;codepoint&lt;/span&gt;(c):
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;&lt;span style=&#34;color:#f92672&#34;&gt;...&lt;/span&gt;     &lt;span style=&#34;color:#66d9ef&#34;&gt;return&lt;/span&gt; &lt;span style=&#34;color:#e6db74&#34;&gt;f&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;U+&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;{&lt;/span&gt;ord(c)&lt;span style=&#34;color:#e6db74&#34;&gt;:&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;04X&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;}&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;&lt;span style=&#34;color:#f92672&#34;&gt;...&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;&lt;span style=&#34;color:#f92672&#34;&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; codepoint(&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;a&amp;#39;&lt;/span&gt;)
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;U+0061&amp;#39;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;&lt;span style=&#34;color:#f92672&#34;&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; codepoint(&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;吃&amp;#39;&lt;/span&gt;)
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;U+5403&amp;#39;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;&lt;span style=&#34;color:#f92672&#34;&gt;&amp;gt;&amp;gt;&amp;gt;&lt;/span&gt; codepoint(&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;💩&amp;#39;&lt;/span&gt;)
+&lt;/span&gt;&lt;/span&gt;&lt;span style=&#34;display:flex;&#34;&gt;&lt;span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;U+1F4A9&amp;#39;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;In general, we can consider it as &lt;strong&gt;a giant table that maps each character to a unique integer&lt;/strong&gt;, called a &lt;em&gt;code point&lt;/em&gt;. Current &lt;a href=&#34;https://www.unicode.org/versions/Unicode17.0.0/&#34;&gt;Unicode 17&lt;/a&gt; has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 &lt;a href=&#34;https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-2/#G16433&#34;&gt;planes&lt;/a&gt;, each with 65,536 code points).&lt;/p&gt;</description>
     </item>
     <item>
       <title>About</title>
-      <link>//localhost:1313/about/</link>
+      <link>https://aoblex.github.io/about/</link>
       <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
-      <guid>//localhost:1313/about/</guid>
+      <guid>https://aoblex.github.io/about/</guid>
       <description>About this site</description>
     </item>
   </channel>
