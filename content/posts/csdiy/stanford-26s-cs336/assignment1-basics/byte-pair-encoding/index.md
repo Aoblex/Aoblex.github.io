@@ -52,6 +52,8 @@ There are three types of UTF algorithms:
 
 among which UTF-8 is the most widely used encoding on the web and we will use UTF-8 throughout this assignment.
 
+---
+
 # Levels of Tokenization
 
 {{< figure
@@ -75,6 +77,8 @@ There are several ways to tokenize such kind of input, primarily based on the le
 
 Most LLMs nowadays use **subword tokenization** such as [BPE](https://arxiv.org/abs/1508.07909), because it gives us the best of both worlds in terms of out-of-vocabulary handling and manageable input sequence lengths
 
+---
+
 # Byte-Level Byte Pair Encoding (BPE)
 
 Subword tokenizers with vocabularies constructed via BPE are often called **BPE tokenizers**.
@@ -95,7 +99,7 @@ It consists of 3 essential parts:
 
 - `merges: list[tuple[Token, Token]]`: a list of merges produced during training ordered by order of creation.
 
-> [!NOTE] Type Alias
+> [!NOTE]- Type Alias
 > I use `Token = bytes` as a type alias.
 
 The training process is the process of learning the tokens and merges from the training data.
@@ -131,10 +135,10 @@ It has two steps:
 
 2. Split by a given [**regular expression**](https://github.com/openai/tiktoken/pull/234/changes): this works better than `.split(' ')`;
 
-> [!NOTE] Terminology
+> [!NOTE]- _word_ and _document_
 > For better consistency and clearness, I introduce the terms:
-> - _document_: the text after splitting by special tokens;
-> - _word_: the text after splitting by regular expression.
+> - _document_: the text after splitting by special tokens (_i.e._ after step 1);
+> - _word_: the text after splitting by regular expression (_i.e._ after step 2), it does not necessarily correspond to a word in the linguistic sense.
 
 ```python
 import regex as re
@@ -165,19 +169,23 @@ print(words)
 # ['low', ' low', ' lower', ' lowest', 'high', ' high', ' higher', ' highest']
 ```
 
-> [!NOTE] Why pre-tokenize?
+> [!NOTE]- Why pre-tokenize?
 > It has several advantages:
 >
 > - **Improves training efficiency**: you can count the appearance of a _word_, then count pairs within the _word_ and multiply by the word count, which is much more efficient than looking through the entire corpus for each pair;
 >
-> - **Avoids different token ids for highly semantically similar tokens** (e.g. `dog!` vs. `dog.`): this is controlled by the regular expression;
+> - **Avoids different token ids for highly semantically similar tokens** (e.g. `dog!` vs. `dog.`): this is controlled by the **regular expression**. It guarantees that punctuation marks are separated from the words.;
 
 
 ### Merge Iterations
 
 This is the core of the training process: **we iteratively pick the most frequent token pair and merge it into a new token until we reach the desired vocabulary size.**
 
-After pre-tokenization, we get a giant list of _words_. For faster training, we can compress the _words_ into a dictionary:
+After pre-tokenization, we get a giant list of _words_. For faster training, we can compress the _words_ into a dictionary, which contains all the information needed for training:
+
+- all _words_;
+- frequency of each _word_;
+- the _tokens_ that compose each _word_.
 
 ```python
 def compress(words):
@@ -221,3 +229,198 @@ Then the training loop is like:
     ```
 
 4. Repeat until we reach the desired vocabulary size.
+
+### Code Design
+
+To train BPE efficiently, I will not directly use this corpus structure for update.
+Instead, I use dicts that keep track of the status of pairs and words in the corpus,
+which requires fairly complicated updates.
+
+To separate the **training iterations** and the **computation details**, I designed two classes:
+
+- [`BPETrainer`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe.py#L144): the entry point for training.
+    - It stores training parameters, vocab and merges, _etc._;
+    - It has a [`train`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe.py#L172) method that does the [loop](#merge-iterations), but does not worry about the implementation details;
+- [`BPECorpus`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe.py#L17): the core of computations.
+    - It maintains the related data structures to support fast iterations;
+    - It uses multi-processes for the initial pre-tokenization;
+
+The core data structures are:
+
+- `pair2count`: stores the count for each pair;
+- `word2count`: stores the count for each word. It never changes during the merge iterations;
+- `pair2words`: stores the words that contain given pair, so that we only need to look up these recorded words instead of all words when merging;
+- `word2tokens`: stores how given word is composed of tokens. We need this to apply merges to words;
+- `pair2count_heap`: a min-heap of (count, pair) with lazy deletion for quick max count pair look up.
+
+### Profiling
+
+Run this command to first generate a profile:
+
+```bash
+uv run python -m cProfile \
+    -o profile/tinystories-10000.out \
+    -m cs336_basics.tokenizer.bpe
+```
+
+Then use this command to see the results:
+
+```bash
+uv run python -m pstats profile/tinystories-10000.out <<'EOF'
+strip
+sort cumtime
+stats bpe
+EOF
+```
+
+And here's the result:
+
+```txt
+Welcome to the profile statistics browser.
+profile/tinystories-10000.out% profile/tinystories-10000.out% profile/tinystories-10000.out% Tue Apr 28 00:04:52 2026    profile/tinystories-10000.out
+
+         18208896 function calls (18064111 primitive calls) in 147.210 seconds
+
+   Ordered by: cumulative time
+   List reduced from 2005 to 12 due to restriction <'bpe'>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000  147.274  147.274 bpe.py:1(<module>)
+        1    0.124    0.124  147.231  147.231 bpe.py:175(train)
+     9743    0.768    0.000   65.416    0.007 bpe.py:116(apply_merge)
+        1    0.190    0.190   49.611   49.611 bpe.py:70(initialize)
+   277780    1.020    0.000    1.525    0.000 bpe.py:36(_word_merge)
+     9743    0.037    0.000    0.206    0.000 bpe.py:109(get_merge_pair)
+    10000    0.006    0.000    0.008    0.000 bpe.py:166(add_token)
+     9743    0.004    0.000    0.006    0.000 bpe.py:171(add_merge)
+        1    0.000    0.000    0.001    0.001 bpe.py:148(__init__)
+        1    0.000    0.000    0.001    0.001 bpe.py:18(__init__)
+        1    0.000    0.000    0.000    0.000 bpe.py:17(BPECorpus)
+        1    0.000    0.000    0.000    0.000 bpe.py:144(BPETrainer)
+
+
+profile/tinystories-10000.out%
+Goodbye.
+```
+
+The total training cost about 147 seconds.
+It is clear that the main bottleneck lies in `initialize`(49.6s) and `apply_merge`(65.4s), which correspond to the pre-tokenization and merge iterations respectively.
+
+To further inspect the details, we can use `callees initialize` or `callees apply_merge`. But I think I'll stop here.
+
+---
+
+# Solutions
+
+Here are part of my solutions to the problems given in the writeup.
+
+> [!goal]- Problem(unicode1): Understanding Unicode (1 point)
+> > [!question]- What Unicode character does `chr(0)` return?
+> > **Answer**:
+> > `'\x00'`: this represents byte value $0$ (4 bytes per digit in hexadecimal).
+>
+> > [!question]- How does this character’s string representation (`__repr__()`) differ from its printed representation?
+> > **Answer**:
+> > - `print`: shows the character itself, which is invisible for `'\x00'`;
+> > - `__repr__()`: shows the escaped hexadecimal representation.
+> >
+> > We can see it more clearly with the utf-8 encoding representation:
+> > ```pycon
+> > >>>print(chr(0))
+> >
+> > >>> chr(0)
+> > '\x00'
+> > >>> list(chr(0).__str__().encode("utf-8"))
+> > [0]
+> > >>> list(chr(0).__repr__().encode("utf-8"))
+> > [39, 92, 120, 48, 48, 39]
+> > ```
+>
+> > [!question]- What happens when this character occurs in text? It may be helpful to play around with the following in your Python interpreter and see if it matches your expectations:
+> > ```pycon
+> > >>> chr(0)
+> > >>> print(chr(0))
+> > >>> "this is a test" + chr(0) + "string"
+> > >>> print("this is a test" + chr(0) + "string")
+> > ```
+> > **Answer**:
+> > When it occurs in text, it is treated as an invisible character and does not affect the printed output.
+> > So `print` won't show any difference. But we can see the difference in the utf-8 encoding representation:
+> > ```pycon
+> > >>> list(("test" + chr(0) + "string").encode("utf-8"))
+> > [116, 101, 115, 116, 0, 115, 116, 114, 105, 110, 103]
+> > >>> list(("teststring").encode("utf-8"))
+> > [116, 101, 115, 116, 115, 116, 114, 105, 110, 103]
+> > ```
+
+> [!goal]- Problem (unicode2):  Unicode Encodings (3 points)
+> > [!question]- What are some reasons to prefer training our tokenizer on $\text{UTF-8}$ encoded bytes, rather than $\text{UTF-16}$ or $\text{UTF-32}$? It may be helpful to compare the output of these encodings for various input strings.
+> > **Answer**:
+> > As mentioned [before](#unicode-transformation-format), $\text{UTF-8}$ is a more efficient algorithm for encoding Unicode characters. Specifically, it matches ASCII encoding for the first 128 characters, which makes it more efficient for English text. I guess that if the primary language of the training data is Chinese, $\text{UTF-16}$ might be more efficient.
+> > Here's a toy example to show the difference:
+> > ```pycon
+> > >>> text = "To be, or not to be, that is the question."
+> > >>> len(text.encode("utf-8"))
+> > 42
+> > >>> len(text.encode("utf-16"))
+> > 86
+> > >>> len(text.encode("utf-32"))
+> > 172
+> > >>> ctext = "生存还是毁灭，这是个问题。"
+> > >>> len(ctext.encode("utf-8"))
+> > 39
+> > >>> len(ctext.encode("utf-16"))
+> > 28
+> > >>> len(ctext.encode("utf-32"))
+> > 56
+> > ```
+>
+> > [!question]- Consider the following (incorrect) function, which is intended to decode a UTF-8 byte string into a Unicode string. Why is this function incorrect? Provide an example of an input byte string that yields incorrect results.
+> > ```pycon
+> > >>> def decode_utf8_bytes_to_str_wrong(bytestring: bytes):
+> > ...     return "".join([bytes([b]).decode("utf-8") for b in bytestring])
+> > ...
+> > >>> decode_utf8_bytes_to_str_wrong("hello".encode("utf-8"))
+> > 'hello'
+> > ```
+> > **Answer**: This function is incorrect because utf-8 doesn't decode byte by byte. Some bytes do not represent valid characters on their own, but only make sense when combined with other bytes, _e.g._, Chinese characters(奶龙), emojis(💩), _etc._. Here's an example:
+> > ```pycon
+> > >>> def decode_utf8_bytes_to_str_wrong(bytestring: bytes):
+> > ...     return "".join([bytes([b]).decode("utf-8") for b in bytestring])
+> > ...
+> > >>> decode_utf8_bytes_to_str_wrong("奶龙".encode("utf-8"))
+> > Traceback (most recent call last):
+> >   File "<python-input-0>", line 4, in <module>
+> >     decode_utf8_bytes_to_str_wrong("奶龙".encode("utf-8"))
+> >     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+> >   File "<python-input-0>", line 2, in decode_utf8_bytes_to_str_wrong
+> >     return "".join([bytes([b]).decode("utf-8") for b in bytestring])
+> >                     ~~~~~~~~~~~~~~~~~^^^^^^^^^
+> > UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe5 in position 0: unexpected end of data
+> > >>> [f"0x{c:02x}" for c in list("奶龙".encode("utf-8"))]
+> > ['0xe5', '0xa5', '0xb6', '0xe9', '0xbe', '0x99']
+> > ```
+>
+> > [!question]- Give a two-byte sequence that does not decode to any Unicode character(s).
+> > **Answer**: `0x80 0x80`
+> > ```pycon
+> > >>> bytes([0x80, 0x80]).decode('utf-8')
+> > Traceback (most recent call last):
+> >   File "<python-input-17>", line 1, in <module>
+> >     bytes([0x80, 0x80]).decode('utf-8')
+> >     ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+> > UnicodeDecodeError: 'utf-8' codec can't decode byte 0x80 in position 0: invalid start byte
+> > ```
+> > I assume that the **decode** means $\text{UTF-8}$ decoding here.
+> > For byte values in $\text{UTF-8}$, we can categorize them into 5 types:
+> > - `0xxxxxxx` (`0x00`–`0x7F`): single-byte character (ASCII)
+> > - `110xxxxx` (`0xC0`–`0xDF`): start of a 2-byte sequence
+> > - `1110xxxx` (`0xE0`–`0xEF`): start of a 3-byte sequence
+> > - `11110xxx` (`0xF0`–`0xF7`): start of a 4-byte sequence
+> > - `10xxxxxx` (`0x80`–`0xBF`): continuation byte (not valid as a starting byte)
+> >
+> > We can consider a **valid** utf-8 character encoding as one of the following forms:
+> > 1. ASCII sequence;
+> > 2. `start of an n-byte sequence` + `n-1 continuation bytes`.
+> >
+> > Any other sequences that **do not follow** these forms are **invalid**, so it's pretty easy to construct one.
