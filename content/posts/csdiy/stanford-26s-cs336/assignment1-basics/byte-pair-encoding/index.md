@@ -10,9 +10,13 @@ Before training a LLM, we will need a tokenizer to convert the raw text input to
 
 In this section, we will use **the Unicode Standard** and train a **BPE** tokenizer.
 
+---
+
 # The Unicode Standard
 
 [The Unicode Standard](https://home.unicode.org/technical-quick-start-guide/#:~:text=The%20Unicode%20Standard%20refers%20to%20the%20standard%20character%20set%20that%20represents%20all%20natural%20language%20characters.%20Unicode%20can%20encode%20up%20to%20roughly%201.1%20million%20characters%2C%20allowing%20it%20to%20support%20all%20of%20the%20world%E2%80%99s%20languages%20and%20scripts%20in%20a%20single%2C%20universal%20standard.) refers to the standard character set that represents all natural language characters. Below are some important concepts.
+
+---
 
 ## Code Points
 
@@ -33,6 +37,8 @@ $$
 ```
 
 In general, we can consider it as **a giant table that maps each character to a unique integer**, called a _code point_. Current [Unicode 17](https://www.unicode.org/versions/Unicode17.0.0/) has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 [planes](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-2/#G16433), each with 65,536 code points).
+
+---
 
 ## Unicode Transformation Format
 
@@ -103,6 +109,8 @@ It consists of 3 essential parts:
 > I use `Token = bytes` as a type alias.
 
 The training process is the process of learning the tokens and merges from the training data.
+
+---
 
 ## BPE: Training
 
@@ -238,10 +246,10 @@ which requires fairly complicated updates.
 
 To separate the **training iterations** and the **computation details**, I designed two classes:
 
-- [`BPETrainer`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe.py#L144): the entry point for training.
+- [`BPETrainer`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L175): the entry point for training.
     - It stores training parameters, vocab and merges, _etc._;
-    - It has a [`train`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe.py#L172) method that does the [loop](#merge-iterations), but does not worry about the implementation details;
-- [`BPECorpus`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe.py#L17): the core of computations.
+    - It has a `train` method that does the [loop](#merge-iterations), but does not worry about the implementation details;
+- [`BPECorpus`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L19): the core of computations.
     - It maintains the related data structures to support fast iterations;
     - It uses multi-processes for the initial pre-tokenization;
 
@@ -260,57 +268,64 @@ I use [`py-spy`](https://github.com/plasma-umass/scalene) to profile.
 ```bash
 uv run py-spy record --subprocesses \
     -o "output/profile/TinyStories.svg" \
-    -- python cs336_basics/tokenizer/bpe.py \
+    -- python cs336_basics/tokenizer/bpe_trainer.py \
             --input_path "./data/TinyStoriesV2-GPT4-train.txt" \
             --vocab_size 10000 \
             --desired_num_chunks 512
 ```
 
 {{< figure
-    src="./figures/bpe-profile.png"
-    alt="BPE Profile"
-    caption="Pre-tokenization Stage(initialization)"
+    src="./figures/bpe-profile/all.png"
+    alt="Profile Overview"
+    caption="Profile Overview of BPE Training on TinyStories"
     width="800"
     align="center"
 >}}
 
-In the left most block contains details about the `train` method(line 258), specifically:
-* **initialization(line 203)**: time consumed in pre-tokenization;
-* **merge iterations(line 219)**: time consumed in applying pair merge;
+The left most block contains details about the `train` method([line 290](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L290)), specifically:
+* **initialization**([line 229](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L229)): time consumed in pre-tokenization;
+* **merge iterations([line 246](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L246))**: time consumed in applying pair merge;
 
 {{< figure
-    src="./figures/bpe-profile1.png"
-    alt="Merge Iterations"
-    caption="Merge Iterations"
+    src="./figures/bpe-profile/train.png"
+    alt="Details in `train`"
+    caption="Details in `train`"
     width="800"
     align="center"
 >}}
 
-The following two blocks is about **multiprocessing**:
+The following two blocks are about **multiprocessing**:
+
+- Process communication is about transferring data between processes. When process communication is expensive, optimization should focus on minimizing data transfer, reducing communication frequency, or using more efficient data-sharing mechanisms.
 
 {{< figure
-    src="./figures/bpe-profile2.png"
+    src="./figures/bpe-profile/process-communication.png"
     alt="Process Communication"
     caption="Process Communication"
     width="800"
     align="center"
 >}}
 
+- The resource tracker introduces overhead when using shared resources in multiprocessing.
+
 {{< figure
-    src="./figures/bpe-profile3.png"
+    src="./figures/bpe-profile/process-resource_tracker.png"
     alt="Resource Tracker"
     caption="Resource Tracker"
     width="800"
     align="center"
 >}}
 
-The remaining 10 blocks (my computer has 10 cores) is about **each process**.
-Specifically, what they do is to pre-tokenize and then build the word2count dictionary.
+The remaining 10 blocks (my computer has 10 cores) is about **each chunk pre-tokenization process**:
+
+- finditer(44.5%, [line 67](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/utils.py#L67)): `for match in compiled_pattern.finditer(document):`
+- group(9.3%, [line 68](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/utils.py#L68)): `word = match.group(0)`
+- dict update(23.4%, [line 69](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/utils.py#L69)): `word2count[word] += 1`
 
 {{< figure
-    src="./figures/bpe-profile4.png"
-    alt="Resource Tracker"
-    caption="Resource Tracker"
+    src="./figures/bpe-profile/pre-tokenize.png"
+    alt="Details in Pre-Tokenization"
+    caption="Details in Pre-Tokenization"
     width="800"
     align="center"
 >}}
@@ -327,9 +342,42 @@ Specifically, what they do is to pre-tokenize and then build the word2count dict
 
 ---
 
+## BPE: Encoding and Decoding
+
+With given _vocabulary_ and _merges_ list, we can now build the tokenizer that does **encoding** and **decoding**.
+
+In a nutshell, we'll need this tokenizer class:
+
+```python
+class BPETokenizer:
+    def encode(self, text: str) -> list[int]: ...
+    def decode(self, token_ids: list[int]) -> str: ...
+```
+
+### Encode
+
+BPE Encoding could be considered as a **replay** of the training process:
+
+1. Split by special tokens (remember to keep them!);
+2. Split by regular expression (must use the same expression as in training);
+3. Tokenize the words we got in step 2:
+    1. A non-special-token word is initially byte-level tokenized. For special tokens, convert to token id directly!;
+    2. Find the token pair in current word with **the smallest merge rank**;
+        - merge rank means the index of this pair in merges list;
+        - break if no token pair is in the merges list;
+    3. Merge the pair, update the word, then go to previous step.
+
+### Decode
+
+Decode is easy: token id $\xrightarrow{\text{vocab}}$ token $\xrightarrow{\text{decode by utf-8}}$ string
+
+We use `error="replace"` for malformed bytes.
+
+---
+
 # Solutions
 
-Here are part of my solutions to the problems given in the writeup.
+Here are my solutions to the problems given in the writeup.
 
 > [!note]- Problem(unicode1): Understanding Unicode (1 point)
 > > [!question]- What Unicode character does `chr(0)` return?
@@ -442,6 +490,22 @@ Here are part of my solutions to the problems given in the writeup.
 > >
 > > Any other sequences that **do not follow** these forms are **invalid**, so it's pretty easy to construct one.
 
+> [!note]- Problem (`train_bpe`):  BPE Tokenizer Training (15 points)
+> > [!question]- Deliverable: Write a function that, given a path to an input text file, trains a (byte-level) BPE tokenizer
+> > To test, run:
+> > ```bash
+> > uv run pytest tests/test_train_bpe.py
+> > ```
+> > To run the trainer, use:
+> > ```bash
+> > uv run python cs336_basics/tokenizer/bpe_trainer.py \
+> > 		--input_path "./data/TinyStoriesV2-GPT4-train.txt" \
+> > 		--vocab_size 10000 \
+> > 		--desired_num_chunks 512 \
+> > 		--save_dir "./output/tokenizer/TinyStories"
+> > ```
+> > It would be great if I implement the trainer in C++ in the future. 🥸
+
 > [!note]- Problem (`train_bpe_tinystories`):  BPE Training on TinyStories (2 points)
 > > [!question]- Train a byte-level BPE tokenizer on the TinyStories dataset, using a maximum vocabulary size of 10,000. Make sure to add the TinyStories `<|endoftext|>` special token to the vocabulary. Serialize the resulting vocabulary and merges to disk for further inspection. How much time and memory did training take? What is the longest token in the vocabulary? Does it make sense?
 > > **Answers**:
@@ -471,3 +535,47 @@ Here are part of my solutions to the problems given in the writeup.
 >
 > > [!question]- Compare and contrast the tokenizer that you get training on TinyStories versus OpenWebText.
 > > **Answers**: I think I need to write a small script to compare the results. I'll do it later.
+
+> [!note]- Problem (`tokenizer`):  Implementing the tokenizer (15 points)
+> > [!question]- Deliverable: Implement a `Tokenizer` class that, given a vocabulary and a list of merges, encodes text into integer IDs and decodes integer IDs into text. Your tokenizer should also support user-provided special tokens (appending them to the vocabulary if they aren’t already there).
+> > To test, run:
+> > ```bash
+> > uv run pytest tests/test_tokenizer.py
+> > ```
+> > To do the following experiments, run:
+> > ```bash
+> > uv run python cs336_basics/tokenizer/bpe_tokenizer.py
+> > ```
+
+> [!note]- Problem (`tokenizer_experiments`):  Experiments with tokenizers (4 points)
+> > [!question]- Sample 10 documents from TinyStories and OpenWebText. Using your previously-trained TinyStories and OpenWebText tokenizers (10K and 32K vocabulary size, respectively), encode these sampled documents into integer IDs. What is each tokenizer’s compression ratio (bytes/token)?
+> > **Answers**: I used 3 documents for shorter runtime.
+> > - TinyStories: **4.1158** bytes/token;
+> > - owt: **4.3654** bytes/token;
+>
+> > [!question]- What happens if you tokenize your OpenWebText sample with the TinyStories tokenizer? Compare the compression ratio and/or qualitatively describe what happens.
+> > **Answer**:
+> > The compression ratio drops by about **a quarter**(4.3654 bytes/token -> 3.1727 bytes/token).
+> > Here's a comprehensive comparison:
+> >
+> > | Dataset      | Tokenizer    | Speed        | Bytes/Token        |
+> > |-------------|-------------|-------------|--------------------|
+> > | TinyStories | TinyStories | 17.4161 MB/s | 4.1158 bytes/token |
+> > | TinyStories | owt         | 17.3404 MB/s | 4.0051 bytes/token |
+> > | owt         | TinyStories | 6.0720 MB/s  | 3.1727 bytes/token |
+> > | owt         | owt         | 5.4671 MB/s  | 4.3654 bytes/token |
+>
+> > [!question]- Estimate the throughput of your tokenizer (e.g., in bytes/second). How long would it take to tokenize the Pile dataset (825GB of text)?
+> > **Answers**:
+> >
+> > The throughput depends on both the tokenizer and the dataset to be tokenized:
+> > - TinyStories $\approx$ **18 MB/s**;
+> > - owt $\approx$ **5.5 MB/s**;
+> >
+> >
+> > Tokenize runtime:
+> > - TinyStories: 825 GB / 18 MB/s $\approx$ **13** hours;
+> > - owt: 825 GB / 5.5 MB/s $\approx$ **42.6** hours;
+>
+> > [!question]- Using your TinyStories and OpenWebText tokenizers, encode the respective training and development datasets into a sequence of integer token IDs. We’ll use this later to train our language model. We recommend serializing the token IDs as a NumPy array of datatype `uint16`. Why is `uint16` an appropriate choice?
+> > **Answer**: `uint16` is of range [0, 65535]. Since our vocabulary is at most 32000, `uint16` would suffice to represent the token IDs.
