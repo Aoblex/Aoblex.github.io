@@ -255,7 +255,32 @@ The core data structures are:
 
 ### Profiling
 
-TODO
+I use [`scalene`](https://github.com/plasma-umass/scalene) to profile.
+The experiment settings are:
+* data: `TinyStoriesV2-GPT4-train.txt`;
+* vocab_size: `10000`;
+* desired_num_chunks: `512`;
+* max_workers: `None`;
+
+In the profile figure below, the five columns correspond to
+- line number;
+- time python;
+- native;
+- system;
+- await / %;
+
+{{< figure
+    src="./figures/bpe-profile.png"
+    alt="BPE Profile"
+    caption="Pre-tokenization Stage(initialization)"
+    width="800"
+    align="center"
+>}}
+
+The result shows that **the pre-tokenization stage** took **93.42%** (3m:38.141s) out of 3m:49.281s, and the **merge iterations** took only about **6.13%** of all time.
+
+> [!caution]- Using scalene with multiprocessing
+> To uses these together, I need to set context to `mp.get_context("fork")` and add the scalene flag `--cpu-only`, so only time is profiled.
 
 ---
 
@@ -263,7 +288,7 @@ TODO
 
 Here are part of my solutions to the problems given in the writeup.
 
-> [!goal]- Problem(unicode1): Understanding Unicode (1 point)
+> [!note]- Problem(unicode1): Understanding Unicode (1 point)
 > > [!question]- What Unicode character does `chr(0)` return?
 > > **Answer**:
 > > `'\x00'`: this represents byte value $0$ (4 bytes per digit in hexadecimal).
@@ -302,7 +327,7 @@ Here are part of my solutions to the problems given in the writeup.
 > > [116, 101, 115, 116, 115, 116, 114, 105, 110, 103]
 > > ```
 
-> [!goal]- Problem (unicode2):  Unicode Encodings (3 points)
+> [!note]- Problem (unicode2):  Unicode Encodings (3 points)
 > > [!question]- What are some reasons to prefer training our tokenizer on $\text{UTF-8}$ encoded bytes, rather than $\text{UTF-16}$ or $\text{UTF-32}$? It may be helpful to compare the output of these encodings for various input strings.
 > > **Answer**:
 > > As mentioned [before](#unicode-transformation-format), $\text{UTF-8}$ is a more efficient algorithm for encoding Unicode characters. Specifically, it matches ASCII encoding for the first 128 characters, which makes it more efficient for English text. I guess that if the primary language of the training data is Chinese, $\text{UTF-16}$ might be more efficient.
