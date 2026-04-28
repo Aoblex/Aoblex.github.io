@@ -216,7 +216,7 @@
         </main>
         
 <footer class="footer">
-        <span>&copy; 2026 <a href="https://aoblex.github.io/">trytry&#39;s blog</a></span> · 
+    <span>&copy; 2026 <a href="https://aoblex.github.io/">trytry&#39;s blog</a></span> · 
 
     <span>
         Powered by
@@ -240,7 +240,7 @@
         if (scrollPosition) {
             menu.scrollLeft = parseInt(scrollPosition, 10);
         }
-        
+
         menu.onscroll = function () {
             localStorage.setItem("menu-scroll-position", menu.scrollLeft);
         }
@@ -306,9 +306,24 @@
             }, 2000);
         }
 
+        function getCopyText(codeblock) {
+            const isPyConsole = codeblock.className.includes('language-pycon');
+
+            if (!isPyConsole) {
+                return codeblock.textContent;
+            }
+
+            return codeblock.textContent
+                .split('\n')
+                .filter(line => /^(>>>|\.\.\.) ?/.test(line))
+                .map(line => line.replace(/^(>>>|\.\.\.) ?/, ''))
+                .join('\n')
+                .trimEnd();
+        }
+
         copybutton.addEventListener('click', (cb) => {
             if ('clipboard' in navigator) {
-                navigator.clipboard.writeText(codeblock.textContent);
+                navigator.clipboard.writeText(getCopyText(codeblock));
                 copyingDone();
                 return;
             }
@@ -337,7 +352,6 @@
             codeblock.parentNode.appendChild(copybutton);
         }
     });
-</script>
-</body>
+</script></body>
 
 </html>

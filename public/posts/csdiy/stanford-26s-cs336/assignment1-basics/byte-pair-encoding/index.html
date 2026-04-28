@@ -24,8 +24,10 @@
 <meta name="keywords" content="">
 <meta name="description" content="Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.
 In this section, we will use the Unicode Standard and train a BPE tokenizer.
+
 The Unicode Standard
 The Unicode Standard refers to the standard character set that represents all natural language characters. Below are some important concepts.
+
 Code Points
 $$
 \text{The Unicode Standard} = \{\text{character(char)}\} \xrightarrow{\text{encoding}} \{\text{code point(int)}\}
@@ -164,8 +166,8 @@ Code Points $$ \text{The Unicode Standard} = \{\text{character(char)}\} \xrighta
   "keywords": [
     
   ],
-  "articleBody": "Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.\nIn this section, we will use the Unicode Standard and train a BPE tokenizer.\nThe Unicode Standard The Unicode Standard refers to the standard character set that represents all natural language characters. Below are some important concepts.\nCode Points $$ \\text{The Unicode Standard} = \\{\\text{character(char)}\\} \\xrightarrow{\\text{encoding}} \\{\\text{code point(int)}\\} $$\u003e\u003e\u003e def codepoint(c): ... return f\"U+{ord(c):04X}\" ... \u003e\u003e\u003e codepoint('a') 'U+0061' \u003e\u003e\u003e codepoint('吃') 'U+5403' \u003e\u003e\u003e codepoint('💩') 'U+1F4A9' In general, we can consider it as a giant table that maps each character to a unique integer, called a code point. Current Unicode 17 has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 planes, each with 65,536 code points).\nUnicode Transformation Format $$ \\text{UTF} = \\{\\text{code point(int)}\\} \\xrightarrow{\\text{encoding}} \\{\\text{byte sequence(bytes)}\\} $$It would be wasteful to encode each character with the corresponding code point, which costs 4 bytes. So we have UTF (Unicode Transformation Format) to save space. It is an algorithmic mapping from every Unicode code point to a unique byte sequence.\nThere are three types of UTF algorithms:\nUTF-8: 1 codepoint = $1 \\sim 4$ bytes\nUTF-16: 1 codepoint = $2 \\text{ or } 4$ bytes\nUTF-32: 1 codepoint = 4 bytes\namong which UTF-8 is the most widely used encoding on the web and we will use UTF-8 throughout this assignment.\nLevels of Tokenization tokenization level\nWith UTF-8 encoding, we are essentially taking a sequence of codepoints which are encoded into a sequence of bytes ($\\in \\{0, 1, \\ldots, 255\\}$). That’s what’s fed into the entire modeling pipeline.\nThere are several ways to tokenize such kind of input, primarily based on the level of tokenization:\nLevel Definition Pros Cons Byte 1 token = 1 byte No OOV token Longer seqlen Word 1 token = 1 word Shorter seqlen Potential OOV token Subword 1 byte ≤ 1 token ≤ 1 word No OOV token and shorter seqlen More complex training process Most LLMs nowadays use subword tokenization such as BPE, because it gives us the best of both worlds in terms of out-of-vocabulary handling and manageable input sequence lengths\nByte-Level Byte Pair Encoding (BPE) Subword tokenizers with vocabularies constructed via BPE are often called BPE tokenizers. It starts with a byte-level vocabulary and iteratively adds new subword-level tokens.\nA trained BPE tokenizer encodes texts like this:\nAn example of BPE encoding from tiktoken\nBPE token IDs\nIt consists of 3 essential parts:\ntoken2id: dict[Token, int]: a mapping from token to token id\nid2token: dict[int, Token]: a mapping from token id to token\nmerges: list[tuple[Token, Token]]: a list of merges produced during training ordered by order of creation.\nType Alias I use Token = bytes as a type alias.\nThe training process is the process of learning the tokens and merges from the training data.\nBPE: Training We can divide BPE training into three stages below.\nInitialization BPE initializes the vocabulary with special tokens and 256 byte values. The merges list is initialized as an empty list.\ntoken2id, id2token = {}, {} merges = [] for special_token in special_tokens: token = special_token.encode(\"utf-8\") token2id[token] = len(token2id) id2token[len(id2token)] = token for i in range(256): token = bytes([i]) token2id[token] = len(token2id) id2token[len(id2token)] = token Pre-tokenization This pre-tokenization stage could be generally considered as a coarse-grained tokenization over the corpus that helps us count how often pairs of tokens appear.\nIt has two steps:\nSplit by special tokens: we do not want to split special tokens;\nSplit by a given regular expression: this works better than .split(' ');\nTerminology For better consistency and clearness, I introduce the terms:\ndocument: the text after splitting by special tokens; word: the text after splitting by regular expression. import regex as re def split_by_special_tokens(text, special_tokens): pattern = \"|\".join(re.escape(token) for token in special_tokens) # note that the special tokens will be dropped in the output of re.split # because we don't need them for training. return re.split(pattern, text) def split_by_regex(text, pattern): return re.findall(pattern, text) text = \"\"\"low low lower lowest\u003c|endoftext|\u003ehigh high higher highest\"\"\" PAT = r\"\"\"'(?:[sdmt]|ll|ve|re)| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+\"\"\" special_tokens = [\"\u003c|endoftext|\u003e\"] documents = split_by_special_tokens(text, special_tokens) print(documents) # output: # ['low low lower lowest', 'high high higher highest'] words = [word for document in documents for word in split_by_regex(document, PAT)] print(words) # output: # ['low', ' low', ' lower', ' lowest', 'high', ' high', ' higher', ' highest'] Why pre-tokenize? It has several advantages:\nImproves training efficiency: you can count the appearance of a word, then count pairs within the word and multiply by the word count, which is much more efficient than looking through the entire corpus for each pair;\nAvoids different token ids for highly semantically similar tokens (e.g. dog! vs. dog.): this is controlled by the regular expression;\nMerge Iterations This is the core of the training process: we iteratively pick the most frequent token pair and merge it into a new token until we reach the desired vocabulary size.\nAfter pre-tokenization, we get a giant list of words. For faster training, we can compress the words into a dictionary:\ndef compress(words): corpus = {} for word in words: tokens = tuple([bytes([w]) for w in word.encode(\"utf-8\")]) corpus[tokens] = corpus.get(tokens, 0) + 1 return corpus corpus = compress(words) # output: # { # (b\" \", b\"h\", b\"i\", b\"g\", b\"h\"): 1, # (b\" \", b\"h\", b\"i\", b\"g\", b\"h\", b\"e\", b\"r\"): 1, # (b\" \", b\"h\", b\"i\", b\"g\", b\"h\", b\"e\", b\"s\", b\"t\"): 1, # (b\" \", b\"l\", b\"o\", b\"w\"): 1, # (b\" \", b\"l\", b\"o\", b\"w\", b\"e\", b\"r\"): 1, # (b\" \", b\"l\", b\"o\", b\"w\", b\"e\", b\"s\", b\"t\"): 1, # (b\"h\", b\"i\", b\"g\", b\"h\"): 1, # (b\"l\", b\"o\", b\"w\"): 1, # } Then the training loop is like:\nFind the most frequent pair in the corpus:\n(token1, token2) = get_most_frequent_pair(corpus) Add the new merged token to the vocabulary and update the merges list:\nnew_token = token1 + token2 add_token(token2id, id2token, new_token) add_merge(merges, token1, token2) Update the corpus by replacing all occurrences of the merged pair with the new token:\ncorpus = update_corpus(corpus, token1, token2) Repeat until we reach the desired vocabulary size.\n",
-  "wordCount" : "1029",
+  "articleBody": "Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.\nIn this section, we will use the Unicode Standard and train a BPE tokenizer.\nThe Unicode Standard The Unicode Standard refers to the standard character set that represents all natural language characters. Below are some important concepts.\nCode Points $$ \\text{The Unicode Standard} = \\{\\text{character(char)}\\} \\xrightarrow{\\text{encoding}} \\{\\text{code point(int)}\\} $$\u003e\u003e\u003e def codepoint(c): ... return f\"U+{ord(c):04X}\" ... \u003e\u003e\u003e codepoint('a') 'U+0061' \u003e\u003e\u003e codepoint('吃') 'U+5403' \u003e\u003e\u003e codepoint('💩') 'U+1F4A9' In general, we can consider it as a giant table that maps each character to a unique integer, called a code point. Current Unicode 17 has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 planes, each with 65,536 code points).\nUnicode Transformation Format $$ \\text{UTF} = \\{\\text{code point(int)}\\} \\xrightarrow{\\text{encoding}} \\{\\text{byte sequence(bytes)}\\} $$It would be wasteful to encode each character with the corresponding code point, which costs 4 bytes. So we have UTF (Unicode Transformation Format) to save space. It is an algorithmic mapping from every Unicode code point to a unique byte sequence.\nThere are three types of UTF algorithms:\nUTF-8: 1 codepoint = $1 \\sim 4$ bytes\nUTF-16: 1 codepoint = $2 \\text{ or } 4$ bytes\nUTF-32: 1 codepoint = 4 bytes\namong which UTF-8 is the most widely used encoding on the web and we will use UTF-8 throughout this assignment.\nLevels of Tokenization tokenization level\nWith UTF-8 encoding, we are essentially taking a sequence of codepoints which are encoded into a sequence of bytes ($\\in \\{0, 1, \\ldots, 255\\}$). That’s what’s fed into the entire modeling pipeline.\nThere are several ways to tokenize such kind of input, primarily based on the level of tokenization:\nLevel Definition Pros Cons Byte 1 token = 1 byte No OOV token Longer seqlen Word 1 token = 1 word Shorter seqlen Potential OOV token Subword 1 byte ≤ 1 token ≤ 1 word No OOV token and shorter seqlen More complex training process Most LLMs nowadays use subword tokenization such as BPE, because it gives us the best of both worlds in terms of out-of-vocabulary handling and manageable input sequence lengths\nByte-Level Byte Pair Encoding (BPE) Subword tokenizers with vocabularies constructed via BPE are often called BPE tokenizers. It starts with a byte-level vocabulary and iteratively adds new subword-level tokens.\nA trained BPE tokenizer encodes texts like this:\nAn example of BPE encoding from tiktoken\nBPE token IDs\nIt consists of 3 essential parts:\ntoken2id: dict[Token, int]: a mapping from token to token id\nid2token: dict[int, Token]: a mapping from token id to token\nmerges: list[tuple[Token, Token]]: a list of merges produced during training ordered by order of creation.\nType Alias I use Token = bytes as a type alias.\nThe training process is the process of learning the tokens and merges from the training data.\nBPE: Training We can divide BPE training into three stages below.\nInitialization BPE initializes the vocabulary with special tokens and 256 byte values. The merges list is initialized as an empty list.\ntoken2id, id2token = {}, {} merges = [] for special_token in special_tokens: token = special_token.encode(\"utf-8\") token2id[token] = len(token2id) id2token[len(id2token)] = token for i in range(256): token = bytes([i]) token2id[token] = len(token2id) id2token[len(id2token)] = token Pre-tokenization This pre-tokenization stage could be generally considered as a coarse-grained tokenization over the corpus that helps us count how often pairs of tokens appear.\nIt has two steps:\nSplit by special tokens: we do not want to split special tokens;\nSplit by a given regular expression: this works better than .split(' ');\nword and document For better consistency and clearness, I introduce the terms:\ndocument: the text after splitting by special tokens (i.e. after step 1); word: the text after splitting by regular expression (i.e. after step 2), it does not necessarily correspond to a word in the linguistic sense. import regex as re def split_by_special_tokens(text, special_tokens): pattern = \"|\".join(re.escape(token) for token in special_tokens) # note that the special tokens will be dropped in the output of re.split # because we don't need them for training. return re.split(pattern, text) def split_by_regex(text, pattern): return re.findall(pattern, text) text = \"\"\"low low lower lowest\u003c|endoftext|\u003ehigh high higher highest\"\"\" PAT = r\"\"\"'(?:[sdmt]|ll|ve|re)| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+\"\"\" special_tokens = [\"\u003c|endoftext|\u003e\"] documents = split_by_special_tokens(text, special_tokens) print(documents) # output: # ['low low lower lowest', 'high high higher highest'] words = [word for document in documents for word in split_by_regex(document, PAT)] print(words) # output: # ['low', ' low', ' lower', ' lowest', 'high', ' high', ' higher', ' highest'] Why pre-tokenize? It has several advantages:\nImproves training efficiency: you can count the appearance of a word, then count pairs within the word and multiply by the word count, which is much more efficient than looking through the entire corpus for each pair;\nAvoids different token ids for highly semantically similar tokens (e.g. dog! vs. dog.): this is controlled by the regular expression. It guarantees that punctuation marks are separated from the words.;\nMerge Iterations This is the core of the training process: we iteratively pick the most frequent token pair and merge it into a new token until we reach the desired vocabulary size.\nAfter pre-tokenization, we get a giant list of words. For faster training, we can compress the words into a dictionary, which contains all the information needed for training:\nall words; frequency of each word; the tokens that compose each word. def compress(words): corpus = {} for word in words: tokens = tuple([bytes([w]) for w in word.encode(\"utf-8\")]) corpus[tokens] = corpus.get(tokens, 0) + 1 return corpus corpus = compress(words) # output: # { # (b\" \", b\"h\", b\"i\", b\"g\", b\"h\"): 1, # (b\" \", b\"h\", b\"i\", b\"g\", b\"h\", b\"e\", b\"r\"): 1, # (b\" \", b\"h\", b\"i\", b\"g\", b\"h\", b\"e\", b\"s\", b\"t\"): 1, # (b\" \", b\"l\", b\"o\", b\"w\"): 1, # (b\" \", b\"l\", b\"o\", b\"w\", b\"e\", b\"r\"): 1, # (b\" \", b\"l\", b\"o\", b\"w\", b\"e\", b\"s\", b\"t\"): 1, # (b\"h\", b\"i\", b\"g\", b\"h\"): 1, # (b\"l\", b\"o\", b\"w\"): 1, # } Then the training loop is like:\nFind the most frequent pair in the corpus:\n(token1, token2) = get_most_frequent_pair(corpus) Add the new merged token to the vocabulary and update the merges list:\nnew_token = token1 + token2 add_token(token2id, id2token, new_token) add_merge(merges, token1, token2) Update the corpus by replacing all occurrences of the merged pair with the new token:\ncorpus = update_corpus(corpus, token1, token2) Repeat until we reach the desired vocabulary size.\nCode Design To train BPE efficiently, I will not directly use this corpus structure for update. Instead, I use dicts that keep track of the status of pairs and words in the corpus, which requires fairly complicated updates.\nTo separate the training iterations and the computation details, I designed two classes:\nBPETrainer: the entry point for training. It stores training parameters, vocab and merges, etc.; It has a train method that does the loop, but does not worry about the implementation details; BPECorpus: the core of computations. It maintains the related data structures to support fast iterations; It uses multi-processes for the initial pre-tokenization; The core data structures are:\npair2count: stores the count for each pair; word2count: stores the count for each word. It never changes during the merge iterations; pair2words: stores the words that contain given pair, so that we only need to look up these recorded words instead of all words when merging; word2tokens: stores how given word is composed of tokens. We need this to apply merges to words; pair2count_heap: a min-heap of (count, pair) with lazy deletion for quick max count pair look up. Profiling I use py-spy to profile.\nuv run py-spy record --subprocesses \\ -o \"output/profile/TinyStories.svg\" \\ -- python cs336_basics/tokenizer/bpe_trainer.py \\ --input_path \"./data/TinyStoriesV2-GPT4-train.txt\" \\ --vocab_size 10000 \\ --desired_num_chunks 512 Profile Overview of BPE Training on TinyStories\nThe left most block contains details about the train method(line 290), specifically:\ninitialization(line 229): time consumed in pre-tokenization; merge iterations(line 246): time consumed in applying pair merge; Details in train\nThe following two blocks are about multiprocessing:\nProcess communication is about transferring data between processes. When process communication is expensive, optimization should focus on minimizing data transfer, reducing communication frequency, or using more efficient data-sharing mechanisms. Process Communication\nThe resource tracker introduces overhead when using shared resources in multiprocessing. Resource Tracker\nThe remaining 10 blocks (my computer has 10 cores) is about each chunk pre-tokenization process:\nfinditer(44.5%, line 67): for match in compiled_pattern.finditer(document): group(9.3%, line 68): word = match.group(0) dict update(23.4%, line 69): word2count[word] += 1 Details in Pre-Tokenization\nOn the choice of profiler I tried to use scalene at first, but it seems that it’s problematic with multiprocessing. So I switched to py-spy. It’s based on sampling and its overhead is very low.\nSummary:\nscalene: best for line-level insight, but less stable with multiprocessing py-spy: most robust, ideal for understanding system-level bottlenecks cProfile: precise function-level stats, but limited for multiprocessing and no memory support BPE: Encoding and Decoding With given vocabulary and merges list, we can now build the tokenizer that does encoding and decoding.\nIn a nutshell, we’ll need this tokenizer class:\nclass BPETokenizer: def encode(self, text: str) -\u003e list[int]: ... def decode(self, token_ids: list[int]) -\u003e str: ... Encode BPE Encoding could be considered as a replay of the training process:\nSplit by special tokens (remember to keep them!); Split by regular expression (must use the same expression as in training); Tokenize the words we got in step 2: A non-special-token word is initially byte-level tokenized. For special tokens, convert to token id directly!; Find the token pair in current word with the smallest merge rank; merge rank means the index of this pair in merges list; break if no token pair is in the merges list; Merge the pair, update the word, then go to previous step. Decode Decode is easy: token id $\\xrightarrow{\\text{vocab}}$ token $\\xrightarrow{\\text{decode by utf-8}}$ string\nWe use error=\"replace\" for malformed bytes.\nSolutions Here are my solutions to the problems given in the writeup.\nProblem(unicode1): Understanding Unicode (1 point) What Unicode character does chr(0) return? Answer: '\\x00': this represents byte value $0$ (4 bytes per digit in hexadecimal).\nHow does this character’s string representation (__repr__()) differ from its printed representation? Answer:\nprint: shows the character itself, which is invisible for '\\x00'; __repr__(): shows the escaped hexadecimal representation. We can see it more clearly with the utf-8 encoding representation:\n\u003e\u003e\u003eprint(chr(0)) \u003e\u003e\u003e chr(0) '\\x00' \u003e\u003e\u003e list(chr(0).__str__().encode(\"utf-8\")) [0] \u003e\u003e\u003e list(chr(0).__repr__().encode(\"utf-8\")) [39, 92, 120, 48, 48, 39] What happens when this character occurs in text? It may be helpful to play around with the following in your Python interpreter and see if it matches your expectations: \u003e\u003e\u003e chr(0) \u003e\u003e\u003e print(chr(0)) \u003e\u003e\u003e \"this is a test\" + chr(0) + \"string\" \u003e\u003e\u003e print(\"this is a test\" + chr(0) + \"string\") Answer: When it occurs in text, it is treated as an invisible character and does not affect the printed output. So print won’t show any difference. But we can see the difference in the utf-8 encoding representation:\n\u003e\u003e\u003e list((\"test\" + chr(0) + \"string\").encode(\"utf-8\")) [116, 101, 115, 116, 0, 115, 116, 114, 105, 110, 103] \u003e\u003e\u003e list((\"teststring\").encode(\"utf-8\")) [116, 101, 115, 116, 115, 116, 114, 105, 110, 103] Problem (unicode2): Unicode Encodings (3 points) What are some reasons to prefer training our tokenizer on $\\text{UTF-8}$ encoded bytes, rather than $\\text{UTF-16}$ or $\\text{UTF-32}$? It may be helpful to compare the output of these encodings for various input strings. Answer: As mentioned before, $\\text{UTF-8}$ is a more efficient algorithm for encoding Unicode characters. Specifically, it matches ASCII encoding for the first 128 characters, which makes it more efficient for English text. I guess that if the primary language of the training data is Chinese, $\\text{UTF-16}$ might be more efficient. Here’s a toy example to show the difference:\n\u003e\u003e\u003e text = \"To be, or not to be, that is the question.\" \u003e\u003e\u003e len(text.encode(\"utf-8\")) 42 \u003e\u003e\u003e len(text.encode(\"utf-16\")) 86 \u003e\u003e\u003e len(text.encode(\"utf-32\")) 172 \u003e\u003e\u003e ctext = \"生存还是毁灭，这是个问题。\" \u003e\u003e\u003e len(ctext.encode(\"utf-8\")) 39 \u003e\u003e\u003e len(ctext.encode(\"utf-16\")) 28 \u003e\u003e\u003e len(ctext.encode(\"utf-32\")) 56 Consider the following (incorrect) function, which is intended to decode a UTF-8 byte string into a Unicode string. Why is this function incorrect? Provide an example of an input byte string that yields incorrect results. \u003e\u003e\u003e def decode_utf8_bytes_to_str_wrong(bytestring: bytes): ... return \"\".join([bytes([b]).decode(\"utf-8\") for b in bytestring]) ... \u003e\u003e\u003e decode_utf8_bytes_to_str_wrong(\"hello\".encode(\"utf-8\")) 'hello' Answer: This function is incorrect because utf-8 doesn’t decode byte by byte. Some bytes do not represent valid characters on their own, but only make sense when combined with other bytes, e.g., Chinese characters(奶龙), emojis(💩), etc.. Here’s an example:\n\u003e\u003e\u003e def decode_utf8_bytes_to_str_wrong(bytestring: bytes): ... return \"\".join([bytes([b]).decode(\"utf-8\") for b in bytestring]) ... \u003e\u003e\u003e decode_utf8_bytes_to_str_wrong(\"奶龙\".encode(\"utf-8\")) Traceback (most recent call last): File \"\", line 4, in decode_utf8_bytes_to_str_wrong(\"奶龙\".encode(\"utf-8\")) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^ File \"\", line 2, in decode_utf8_bytes_to_str_wrong return \"\".join([bytes([b]).decode(\"utf-8\") for b in bytestring]) ~~~~~~~~~~~~~~~~~^^^^^^^^^ UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe5 in position 0: unexpected end of data \u003e\u003e\u003e [f\"0x{c:02x}\" for c in list(\"奶龙\".encode(\"utf-8\"))] ['0xe5', '0xa5', '0xb6', '0xe9', '0xbe', '0x99'] Give a two-byte sequence that does not decode to any Unicode character(s). Answer: 0x80 0x80\n\u003e\u003e\u003e bytes([0x80, 0x80]).decode('utf-8') Traceback (most recent call last): File \"\", line 1, in bytes([0x80, 0x80]).decode('utf-8') ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^ UnicodeDecodeError: 'utf-8' codec can't decode byte 0x80 in position 0: invalid start byte I assume that the decode means $\\text{UTF-8}$ decoding here. For byte values in $\\text{UTF-8}$, we can categorize them into 5 types:\n0xxxxxxx (0x00–0x7F): single-byte character (ASCII) 110xxxxx (0xC0–0xDF): start of a 2-byte sequence 1110xxxx (0xE0–0xEF): start of a 3-byte sequence 11110xxx (0xF0–0xF7): start of a 4-byte sequence 10xxxxxx (0x80–0xBF): continuation byte (not valid as a starting byte) We can consider a valid utf-8 character encoding as one of the following forms:\nASCII sequence; start of an n-byte sequence + n-1 continuation bytes. Any other sequences that do not follow these forms are invalid, so it’s pretty easy to construct one.\nProblem (train_bpe): BPE Tokenizer Training (15 points) Deliverable: Write a function that, given a path to an input text file, trains a (byte-level) BPE tokenizer To test, run:\nuv run pytest tests/test_train_bpe.py To run the trainer, use:\nuv run python cs336_basics/tokenizer/bpe_trainer.py \\ --input_path \"./data/TinyStoriesV2-GPT4-train.txt\" \\ --vocab_size 10000 \\ --desired_num_chunks 512 \\ --save_dir \"./output/tokenizer/TinyStories\" It would be great if I implement the trainer in C++ in the future. 🥸\nProblem (train_bpe_tinystories): BPE Training on TinyStories (2 points) Train a byte-level BPE tokenizer on the TinyStories dataset, using a maximum vocabulary size of 10,000. Make sure to add the TinyStories \u003c|endoftext|\u003e special token to the vocabulary. Serialize the resulting vocabulary and merges to disk for further inspection. How much time and memory did training take? What is the longest token in the vocabulary? Does it make sense? Answers:\nIt took about 30 seconds. I didn’t track the memory. Probably a few GBs. The longest token is b' accomplishment', length=15. I think it makes sense. It’s a valid word. Profile your code. What part of the tokenizer training process takes the most time? Answer: The most time-consuming part is pre-tokenization stage (about 80% of all time), specifically:\nfinditer $\\approx$ 45.1%; word = match.group(0) $\\approx$ 8.5%; word2count[word] += 1 $\\approx$ 23.4%; Problem (train_bpe_expts_owt): BPE Training on OpenWebText (2 points) Train a byte-level BPE tokenizer on the OpenWebText dataset, using a maximum vocabulary size of 32,000. Serialize the resulting vocabulary and merges to disk for further inspection. What is the longest token in the vocabulary? Does it make sense? Answers:\nThe training took about 2min53s(pre-tokenize) + 4min15s(merging) = 7min8s(total). The longest token is b'\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82', length=64. We can use grep to check this token: sh\u003e LONGEST_TOKEN=$'\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82\\xc3\\x83\\xc3\\x82' sh\u003e grep -a -m 1 ${LONGEST_TOKEN} ./data/owt_train.txt Subject: How bout the sound Who cares how great the show is if you canÃÂÃÂÃÂÃ ... ÃÂÃÂÃÂÃÂt hear it. Sounds like it was recorded at the bottom of my swimming pool, 1 star. If your a collector then (because it's brent's first show) it might be worth the download. If you want good music, favor yourself and skip it. - January 7, 2005How bout the sound I think it makes sense because at least it exists in the data. It just learned some corrupted token from corrupted text. Compare and contrast the tokenizer that you get training on TinyStories versus OpenWebText. Answers: I think I need to write a small script to compare the results. I’ll do it later.\nProblem (tokenizer): Implementing the tokenizer (15 points) Deliverable: Implement a Tokenizer class that, given a vocabulary and a list of merges, encodes text into integer IDs and decodes integer IDs into text. Your tokenizer should also support user-provided special tokens (appending them to the vocabulary if they aren’t already there). To test, run:\nuv run pytest tests/test_tokenizer.py To do the following experiments, run:\nuv run python cs336_basics/tokenizer/bpe_tokenizer.py Problem (tokenizer_experiments): Experiments with tokenizers (4 points) Sample 10 documents from TinyStories and OpenWebText. Using your previously-trained TinyStories and OpenWebText tokenizers (10K and 32K vocabulary size, respectively), encode these sampled documents into integer IDs. What is each tokenizer’s compression ratio (bytes/token)? Answers: I used 3 documents for shorter runtime.\nTinyStories: 4.1158 bytes/token; owt: 4.3654 bytes/token; What happens if you tokenize your OpenWebText sample with the TinyStories tokenizer? Compare the compression ratio and/or qualitatively describe what happens. Answer: The compression ratio drops by about a quarter(4.3654 bytes/token -\u003e 3.1727 bytes/token). Here’s a comprehensive comparison:\nDataset Tokenizer Speed Bytes/Token TinyStories TinyStories 17.4161 MB/s 4.1158 bytes/token TinyStories owt 17.3404 MB/s 4.0051 bytes/token owt TinyStories 6.0720 MB/s 3.1727 bytes/token owt owt 5.4671 MB/s 4.3654 bytes/token Estimate the throughput of your tokenizer (e.g., in bytes/second). How long would it take to tokenize the Pile dataset (825GB of text)? Answers:\nThe throughput depends on both the tokenizer and the dataset to be tokenized:\nTinyStories $\\approx$ 18 MB/s; owt $\\approx$ 5.5 MB/s; Tokenize runtime:\nTinyStories: 825 GB / 18 MB/s $\\approx$ 13 hours; owt: 825 GB / 5.5 MB/s $\\approx$ 42.6 hours; Using your TinyStories and OpenWebText tokenizers, encode the respective training and development datasets into a sequence of integer token IDs. We’ll use this later to train our language model. We recommend serializing the token IDs as a NumPy array of datatype uint16. Why is uint16 an appropriate choice? Answer: uint16 is of range [0, 65535]. Since our vocabulary is at most 32000, uint16 would suffice to represent the token IDs.\n",
+  "wordCount" : "3019",
   "inLanguage": "en",
   "datePublished": "2026-04-16T20:31:41+08:00",
   "dateModified": "2026-04-16T20:31:41+08:00",
@@ -266,7 +268,7 @@ Code Points $$ \text{The Unicode Standard} = \{\text{character(char)}\} \xrighta
     <h1 class="post-title entry-hint-parent">
       Byte Pair Encoding
     </h1>
-    <div class="post-meta"><span title='2026-04-16 20:31:41 +0800 CST'>April 16, 2026</span>&nbsp;·&nbsp;<span>5 min</span>
+    <div class="post-meta"><span title='2026-04-16 20:31:41 +0800 CST'>April 16, 2026</span>&nbsp;·&nbsp;<span>15 min</span>
 
 </div>
   </header> <details class="toc" >
@@ -296,20 +298,34 @@ Code Points $$ \text{The Unicode Standard} = \{\text{character(char)}\} \xrighta
             <li>
                 <a href="#pre-tokenization" aria-label="Pre-tokenization">Pre-tokenization</a></li>
             <li>
-                <a href="#merge-iterations" aria-label="Merge Iterations">Merge Iterations</a>
+                <a href="#merge-iterations" aria-label="Merge Iterations">Merge Iterations</a></li>
+            <li>
+                <a href="#code-design" aria-label="Code Design">Code Design</a></li>
+            <li>
+                <a href="#profiling" aria-label="Profiling">Profiling</a></li></ul>
             </li>
-        </ul>
-        </li>
-        </ul>
-        </li>
+            <li>
+                <a href="#bpe-encoding-and-decoding" aria-label="BPE: Encoding and Decoding">BPE: Encoding and Decoding</a><ul>
+                    
+            <li>
+                <a href="#encode" aria-label="Encode">Encode</a></li>
+            <li>
+                <a href="#decode" aria-label="Decode">Decode</a></li></ul>
+            </li></ul>
+            </li>
+            <li>
+                <a href="#solutions" aria-label="Solutions">Solutions</a>
+            </li>
         </ul>
     </div>
 </details>
 
   <div class="post-content md-content"><p>Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.</p>
 <p>In this section, we will use <strong>the Unicode Standard</strong> and train a <strong>BPE</strong> tokenizer.</p>
+<hr>
 <h1 id="the-unicode-standard">The Unicode Standard<a hidden class="anchor" aria-hidden="true" href="#the-unicode-standard">#</a></h1>
 <p><a href="https://home.unicode.org/technical-quick-start-guide/#:~:text=The%20Unicode%20Standard%20refers%20to%20the%20standard%20character%20set%20that%20represents%20all%20natural%20language%20characters.%20Unicode%20can%20encode%20up%20to%20roughly%201.1%20million%20characters%2C%20allowing%20it%20to%20support%20all%20of%20the%20world%E2%80%99s%20languages%20and%20scripts%20in%20a%20single%2C%20universal%20standard.">The Unicode Standard</a> refers to the standard character set that represents all natural language characters. Below are some important concepts.</p>
+<hr>
 <h2 id="code-points">Code Points<a hidden class="anchor" aria-hidden="true" href="#code-points">#</a></h2>
 $$
 \text{The Unicode Standard} = \{\text{character(char)}\} \xrightarrow{\text{encoding}} \{\text{code point(int)}\}
@@ -323,6 +339,7 @@ $$<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color
 </span></span><span style="display:flex;"><span><span style="color:#f92672">&gt;&gt;&gt;</span> codepoint(<span style="color:#e6db74">&#39;💩&#39;</span>)
 </span></span><span style="display:flex;"><span><span style="color:#e6db74">&#39;U+1F4A9&#39;</span>
 </span></span></code></pre></div><p>In general, we can consider it as <strong>a giant table that maps each character to a unique integer</strong>, called a <em>code point</em>. Current <a href="https://www.unicode.org/versions/Unicode17.0.0/">Unicode 17</a> has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 <a href="https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-2/#G16433">planes</a>, each with 65,536 code points).</p>
+<hr>
 <h2 id="unicode-transformation-format">Unicode Transformation Format<a hidden class="anchor" aria-hidden="true" href="#unicode-transformation-format">#</a></h2>
 $$
 \text{UTF} = \{\text{code point(int)}\} \xrightarrow{\text{encoding}} \{\text{byte sequence(bytes)}\}
@@ -340,6 +357,7 @@ $$<p>It would be wasteful to encode each character with the corresponding code p
 </li>
 </ul>
 <p>among which UTF-8 is the most widely used encoding on the web and we will use UTF-8 throughout this assignment.</p>
+<hr>
 <h1 id="levels-of-tokenization">Levels of Tokenization<a hidden class="anchor" aria-hidden="true" href="#levels-of-tokenization">#</a></h1>
 <figure class="align-center ">
     <img loading="lazy" src="figures/tokenization-level.png#center"
@@ -382,6 +400,7 @@ That&rsquo;s what&rsquo;s fed into the entire modeling pipeline.</p>
   </tbody>
 </table>
 <p>Most LLMs nowadays use <strong>subword tokenization</strong> such as <a href="https://arxiv.org/abs/1508.07909">BPE</a>, because it gives us the best of both worlds in terms of out-of-vocabulary handling and manageable input sequence lengths</p>
+<hr>
 <h1 id="byte-level-byte-pair-encoding-bpe">Byte-Level Byte Pair Encoding (BPE)<a hidden class="anchor" aria-hidden="true" href="#byte-level-byte-pair-encoding-bpe">#</a></h1>
 <p>Subword tokenizers with vocabularies constructed via BPE are often called <strong>BPE tokenizers</strong>.
 It starts with a byte-level vocabulary and iteratively adds new subword-level tokens.</p>
@@ -407,14 +426,15 @@ It starts with a byte-level vocabulary and iteratively adds new subword-level to
 </ul>
 
             <link rel="stylesheet" href="/css/vendors/admonitions.53cd9f8afa9d9a8ac09093f668df057bc6d0f4bbd0886f39991a7b99934a7432.css" integrity="sha256-U82fivqdmorAkJP2aN8Fe8bQ9LvQiG85mRp7mZNKdDI=" crossorigin="anonymous">
-    <div class="admonition note">
-      <div class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+    <details class="admonition note">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
         <span>Type Alias</span>
-      </div>
+      </summary>
       <div class="admonition-content">
         <p>I use <code>Token = bytes</code> as a type alias.</p>
       </div>
-    </div><p>The training process is the process of learning the tokens and merges from the training data.</p>
+    </details><p>The training process is the process of learning the tokens and merges from the training data.</p>
+<hr>
 <h2 id="bpe-training">BPE: Training<a hidden class="anchor" aria-hidden="true" href="#bpe-training">#</a></h2>
 <p>We can divide BPE training into three stages below.</p>
 <h3 id="initialization">Initialization<a hidden class="anchor" aria-hidden="true" href="#initialization">#</a></h3>
@@ -442,18 +462,18 @@ The merges list is initialized as an empty list.</p>
 </li>
 </ol>
 
-    <div class="admonition note">
-      <div class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
-        <span>Terminology</span>
-      </div>
+    <details class="admonition note">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span><em>word</em> and <em>document</em></span>
+      </summary>
       <div class="admonition-content">
         <p>For better consistency and clearness, I introduce the terms:</p>
 <ul>
-<li><em>document</em>: the text after splitting by special tokens;</li>
-<li><em>word</em>: the text after splitting by regular expression.</li>
+<li><em>document</em>: the text after splitting by special tokens (<em>i.e.</em> after step 1);</li>
+<li><em>word</em>: the text after splitting by regular expression (<em>i.e.</em> after step 2), it does not necessarily correspond to a word in the linguistic sense.</li>
 </ul>
       </div>
-    </div><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#f92672">import</span> regex <span style="color:#66d9ef">as</span> re
+    </details><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#f92672">import</span> regex <span style="color:#66d9ef">as</span> re
 </span></span><span style="display:flex;"><span>
 </span></span><span style="display:flex;"><span>
 </span></span><span style="display:flex;"><span><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">split_by_special_tokens</span>(text, special_tokens):
@@ -480,10 +500,10 @@ The merges list is initialized as an empty list.</p>
 </span></span><span style="display:flex;"><span><span style="color:#75715e"># output:</span>
 </span></span><span style="display:flex;"><span><span style="color:#75715e"># [&#39;low&#39;, &#39; low&#39;, &#39; lower&#39;, &#39; lowest&#39;, &#39;high&#39;, &#39; high&#39;, &#39; higher&#39;, &#39; highest&#39;]</span>
 </span></span></code></pre></div>
-    <div class="admonition note">
-      <div class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+    <details class="admonition note">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
         <span>Why pre-tokenize?</span>
-      </div>
+      </summary>
       <div class="admonition-content">
         <p>It has several advantages:</p>
 <ul>
@@ -491,13 +511,18 @@ The merges list is initialized as an empty list.</p>
 <p><strong>Improves training efficiency</strong>: you can count the appearance of a <em>word</em>, then count pairs within the <em>word</em> and multiply by the word count, which is much more efficient than looking through the entire corpus for each pair;</p>
 </li>
 <li>
-<p><strong>Avoids different token ids for highly semantically similar tokens</strong> (e.g. <code>dog!</code> vs. <code>dog.</code>): this is controlled by the regular expression;</p>
+<p><strong>Avoids different token ids for highly semantically similar tokens</strong> (e.g. <code>dog!</code> vs. <code>dog.</code>): this is controlled by the <strong>regular expression</strong>. It guarantees that punctuation marks are separated from the words.;</p>
 </li>
 </ul>
       </div>
-    </div><h3 id="merge-iterations">Merge Iterations<a hidden class="anchor" aria-hidden="true" href="#merge-iterations">#</a></h3>
+    </details><h3 id="merge-iterations">Merge Iterations<a hidden class="anchor" aria-hidden="true" href="#merge-iterations">#</a></h3>
 <p>This is the core of the training process: <strong>we iteratively pick the most frequent token pair and merge it into a new token until we reach the desired vocabulary size.</strong></p>
-<p>After pre-tokenization, we get a giant list of <em>words</em>. For faster training, we can compress the <em>words</em> into a dictionary:</p>
+<p>After pre-tokenization, we get a giant list of <em>words</em>. For faster training, we can compress the <em>words</em> into a dictionary, which contains all the information needed for training:</p>
+<ul>
+<li>all <em>words</em>;</li>
+<li>frequency of each <em>word</em>;</li>
+<li>the <em>tokens</em> that compose each <em>word</em>.</li>
+</ul>
 <div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">compress</span>(words):
 </span></span><span style="display:flex;"><span>    corpus <span style="color:#f92672">=</span> {}
 </span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">for</span> word <span style="color:#f92672">in</span> words:
@@ -538,7 +563,495 @@ The merges list is initialized as an empty list.</p>
 <p>Repeat until we reach the desired vocabulary size.</p>
 </li>
 </ol>
+<h3 id="code-design">Code Design<a hidden class="anchor" aria-hidden="true" href="#code-design">#</a></h3>
+<p>To train BPE efficiently, I will not directly use this corpus structure for update.
+Instead, I use dicts that keep track of the status of pairs and words in the corpus,
+which requires fairly complicated updates.</p>
+<p>To separate the <strong>training iterations</strong> and the <strong>computation details</strong>, I designed two classes:</p>
+<ul>
+<li><a href="https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L175"><code>BPETrainer</code></a>: the entry point for training.
+<ul>
+<li>It stores training parameters, vocab and merges, <em>etc.</em>;</li>
+<li>It has a <code>train</code> method that does the <a href="#merge-iterations">loop</a>, but does not worry about the implementation details;</li>
+</ul>
+</li>
+<li><a href="https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L19"><code>BPECorpus</code></a>: the core of computations.
+<ul>
+<li>It maintains the related data structures to support fast iterations;</li>
+<li>It uses multi-processes for the initial pre-tokenization;</li>
+</ul>
+</li>
+</ul>
+<p>The core data structures are:</p>
+<ul>
+<li><code>pair2count</code>: stores the count for each pair;</li>
+<li><code>word2count</code>: stores the count for each word. It never changes during the merge iterations;</li>
+<li><code>pair2words</code>: stores the words that contain given pair, so that we only need to look up these recorded words instead of all words when merging;</li>
+<li><code>word2tokens</code>: stores how given word is composed of tokens. We need this to apply merges to words;</li>
+<li><code>pair2count_heap</code>: a min-heap of (count, pair) with lazy deletion for quick max count pair look up.</li>
+</ul>
+<h3 id="profiling">Profiling<a hidden class="anchor" aria-hidden="true" href="#profiling">#</a></h3>
+<p>I use <a href="https://github.com/plasma-umass/scalene"><code>py-spy</code></a> to profile.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>uv run py-spy record --subprocesses <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#ae81ff"></span>    -o <span style="color:#e6db74">&#34;output/profile/TinyStories.svg&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#ae81ff"></span>    -- python cs336_basics/tokenizer/bpe_trainer.py <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#ae81ff"></span>            --input_path <span style="color:#e6db74">&#34;./data/TinyStoriesV2-GPT4-train.txt&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#ae81ff"></span>            --vocab_size <span style="color:#ae81ff">10000</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#ae81ff"></span>            --desired_num_chunks <span style="color:#ae81ff">512</span>
+</span></span></code></pre></div><figure class="align-center ">
+    <img loading="lazy" src="./figures/bpe-profile/all.png#center"
+         alt="Profile Overview" width="800"/> <figcaption>
+            <p>Profile Overview of BPE Training on TinyStories</p>
+        </figcaption>
+</figure>
 
+<p>The left most block contains details about the <code>train</code> method(<a href="https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L290">line 290</a>), specifically:</p>
+<ul>
+<li><strong>initialization</strong>(<a href="https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L229">line 229</a>): time consumed in pre-tokenization;</li>
+<li><strong>merge iterations(<a href="https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L246">line 246</a>)</strong>: time consumed in applying pair merge;</li>
+</ul>
+<figure class="align-center ">
+    <img loading="lazy" src="./figures/bpe-profile/train.png#center"
+         alt="Details in `train`" width="800"/> <figcaption>
+            <p>Details in <code>train</code></p>
+        </figcaption>
+</figure>
+
+<p>The following two blocks are about <strong>multiprocessing</strong>:</p>
+<ul>
+<li>Process communication is about transferring data between processes. When process communication is expensive, optimization should focus on minimizing data transfer, reducing communication frequency, or using more efficient data-sharing mechanisms.</li>
+</ul>
+<figure class="align-center ">
+    <img loading="lazy" src="./figures/bpe-profile/process-communication.png#center"
+         alt="Process Communication" width="800"/> <figcaption>
+            <p>Process Communication</p>
+        </figcaption>
+</figure>
+
+<ul>
+<li>The resource tracker introduces overhead when using shared resources in multiprocessing.</li>
+</ul>
+<figure class="align-center ">
+    <img loading="lazy" src="./figures/bpe-profile/process-resource_tracker.png#center"
+         alt="Resource Tracker" width="800"/> <figcaption>
+            <p>Resource Tracker</p>
+        </figcaption>
+</figure>
+
+<p>The remaining 10 blocks (my computer has 10 cores) is about <strong>each chunk pre-tokenization process</strong>:</p>
+<ul>
+<li>finditer(44.5%, <a href="https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/utils.py#L67">line 67</a>): <code>for match in compiled_pattern.finditer(document):</code></li>
+<li>group(9.3%, <a href="https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/utils.py#L68">line 68</a>): <code>word = match.group(0)</code></li>
+<li>dict update(23.4%, <a href="https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/utils.py#L69">line 69</a>): <code>word2count[word] += 1</code></li>
+</ul>
+<figure class="align-center ">
+    <img loading="lazy" src="./figures/bpe-profile/pre-tokenize.png#center"
+         alt="Details in Pre-Tokenization" width="800"/> <figcaption>
+            <p>Details in Pre-Tokenization</p>
+        </figcaption>
+</figure>
+
+
+    <details class="admonition note">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span>On the choice of profiler</span>
+      </summary>
+      <div class="admonition-content">
+        <p>I tried to use <a href="https://github.com/plasma-umass/scalene"><code>scalene</code></a> at first, but it seems that it&rsquo;s problematic with multiprocessing.
+So I switched to <a href="https://github.com/benfred/py-spy"><code>py-spy</code></a>. It&rsquo;s based on sampling and its overhead is very low.</p>
+<p><strong>Summary:</strong></p>
+<ul>
+<li><code>scalene</code>: best for line-level insight, but less stable with multiprocessing</li>
+<li><code>py-spy</code>: most robust, ideal for understanding system-level bottlenecks</li>
+<li><code>cProfile</code>: precise function-level stats, but limited for multiprocessing and no memory support</li>
+</ul>
+      </div>
+    </details><hr>
+<h2 id="bpe-encoding-and-decoding">BPE: Encoding and Decoding<a hidden class="anchor" aria-hidden="true" href="#bpe-encoding-and-decoding">#</a></h2>
+<p>With given <em>vocabulary</em> and <em>merges</em> list, we can now build the tokenizer that does <strong>encoding</strong> and <strong>decoding</strong>.</p>
+<p>In a nutshell, we&rsquo;ll need this tokenizer class:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#66d9ef">class</span> <span style="color:#a6e22e">BPETokenizer</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">encode</span>(self, text: str) <span style="color:#f92672">-&gt;</span> list[int]: <span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">decode</span>(self, token_ids: list[int]) <span style="color:#f92672">-&gt;</span> str: <span style="color:#f92672">...</span>
+</span></span></code></pre></div><h3 id="encode">Encode<a hidden class="anchor" aria-hidden="true" href="#encode">#</a></h3>
+<p>BPE Encoding could be considered as a <strong>replay</strong> of the training process:</p>
+<ol>
+<li>Split by special tokens (remember to keep them!);</li>
+<li>Split by regular expression (must use the same expression as in training);</li>
+<li>Tokenize the words we got in step 2:
+<ol>
+<li>A non-special-token word is initially byte-level tokenized. For special tokens, convert to token id directly!;</li>
+<li>Find the token pair in current word with <strong>the smallest merge rank</strong>;
+<ul>
+<li>merge rank means the index of this pair in merges list;</li>
+<li>break if no token pair is in the merges list;</li>
+</ul>
+</li>
+<li>Merge the pair, update the word, then go to previous step.</li>
+</ol>
+</li>
+</ol>
+<h3 id="decode">Decode<a hidden class="anchor" aria-hidden="true" href="#decode">#</a></h3>
+<p>Decode is easy: token id $\xrightarrow{\text{vocab}}$ token $\xrightarrow{\text{decode by utf-8}}$ string</p>
+<p>We use <code>error=&quot;replace&quot;</code> for malformed bytes.</p>
+<hr>
+<h1 id="solutions">Solutions<a hidden class="anchor" aria-hidden="true" href="#solutions">#</a></h1>
+<p>Here are my solutions to the problems given in the writeup.</p>
+
+    <details class="admonition note">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span>Problem(unicode1): Understanding Unicode (1 point)</span>
+      </summary>
+      <div class="admonition-content">
+        
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>What Unicode character does <code>chr(0)</code> return?</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answer</strong>:
+<code>'\x00'</code>: this represents byte value $0$ (4 bytes per digit in hexadecimal).</p>
+      </div>
+    </details>
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>How does this character’s string representation (<code>__repr__()</code>) differ from its printed representation?</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answer</strong>:</p>
+<ul>
+<li><code>print</code>: shows the character itself, which is invisible for <code>'\x00'</code>;</li>
+<li><code>__repr__()</code>: shows the escaped hexadecimal representation.</li>
+</ul>
+<p>We can see it more clearly with the utf-8 encoding representation:</p>
+<pre tabindex="0"><code class="language-pycon" data-lang="pycon">&gt;&gt;&gt;print(chr(0))
+
+&gt;&gt;&gt; chr(0)
+&#39;\x00&#39;
+&gt;&gt;&gt; list(chr(0).__str__().encode(&#34;utf-8&#34;))
+[0]
+&gt;&gt;&gt; list(chr(0).__repr__().encode(&#34;utf-8&#34;))
+[39, 92, 120, 48, 48, 39]
+</code></pre>
+      </div>
+    </details>
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>What happens when this character occurs in text? It may be helpful to play around with the following in your Python interpreter and see if it matches your expectations:</span>
+      </summary>
+      <div class="admonition-content">
+        <pre tabindex="0"><code class="language-pycon" data-lang="pycon">&gt;&gt;&gt; chr(0)
+&gt;&gt;&gt; print(chr(0))
+&gt;&gt;&gt; &#34;this is a test&#34; + chr(0) + &#34;string&#34;
+&gt;&gt;&gt; print(&#34;this is a test&#34; + chr(0) + &#34;string&#34;)
+</code></pre><p><strong>Answer</strong>:
+When it occurs in text, it is treated as an invisible character and does not affect the printed output.
+So <code>print</code> won&rsquo;t show any difference. But we can see the difference in the utf-8 encoding representation:</p>
+<pre tabindex="0"><code class="language-pycon" data-lang="pycon">&gt;&gt;&gt; list((&#34;test&#34; + chr(0) + &#34;string&#34;).encode(&#34;utf-8&#34;))
+[116, 101, 115, 116, 0, 115, 116, 114, 105, 110, 103]
+&gt;&gt;&gt; list((&#34;teststring&#34;).encode(&#34;utf-8&#34;))
+[116, 101, 115, 116, 115, 116, 114, 105, 110, 103]
+</code></pre>
+      </div>
+    </details>
+      </div>
+    </details>
+    <details class="admonition note">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span>Problem (unicode2):  Unicode Encodings (3 points)</span>
+      </summary>
+      <div class="admonition-content">
+        
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>What are some reasons to prefer training our tokenizer on $\text{UTF-8}$ encoded bytes, rather than $\text{UTF-16}$ or $\text{UTF-32}$? It may be helpful to compare the output of these encodings for various input strings.</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answer</strong>:
+As mentioned <a href="#unicode-transformation-format">before</a>, $\text{UTF-8}$ is a more efficient algorithm for encoding Unicode characters. Specifically, it matches ASCII encoding for the first 128 characters, which makes it more efficient for English text. I guess that if the primary language of the training data is Chinese, $\text{UTF-16}$ might be more efficient.
+Here&rsquo;s a toy example to show the difference:</p>
+<pre tabindex="0"><code class="language-pycon" data-lang="pycon">&gt;&gt;&gt; text = &#34;To be, or not to be, that is the question.&#34;
+&gt;&gt;&gt; len(text.encode(&#34;utf-8&#34;))
+42
+&gt;&gt;&gt; len(text.encode(&#34;utf-16&#34;))
+86
+&gt;&gt;&gt; len(text.encode(&#34;utf-32&#34;))
+172
+&gt;&gt;&gt; ctext = &#34;生存还是毁灭，这是个问题。&#34;
+&gt;&gt;&gt; len(ctext.encode(&#34;utf-8&#34;))
+39
+&gt;&gt;&gt; len(ctext.encode(&#34;utf-16&#34;))
+28
+&gt;&gt;&gt; len(ctext.encode(&#34;utf-32&#34;))
+56
+</code></pre>
+      </div>
+    </details>
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>Consider the following (incorrect) function, which is intended to decode a UTF-8 byte string into a Unicode string. Why is this function incorrect? Provide an example of an input byte string that yields incorrect results.</span>
+      </summary>
+      <div class="admonition-content">
+        <pre tabindex="0"><code class="language-pycon" data-lang="pycon">&gt;&gt;&gt; def decode_utf8_bytes_to_str_wrong(bytestring: bytes):
+...     return &#34;&#34;.join([bytes([b]).decode(&#34;utf-8&#34;) for b in bytestring])
+...
+&gt;&gt;&gt; decode_utf8_bytes_to_str_wrong(&#34;hello&#34;.encode(&#34;utf-8&#34;))
+&#39;hello&#39;
+</code></pre><p><strong>Answer</strong>: This function is incorrect because utf-8 doesn&rsquo;t decode byte by byte. Some bytes do not represent valid characters on their own, but only make sense when combined with other bytes, <em>e.g.</em>, Chinese characters(奶龙), emojis(💩), <em>etc.</em>. Here&rsquo;s an example:</p>
+<pre tabindex="0"><code class="language-pycon" data-lang="pycon">&gt;&gt;&gt; def decode_utf8_bytes_to_str_wrong(bytestring: bytes):
+...     return &#34;&#34;.join([bytes([b]).decode(&#34;utf-8&#34;) for b in bytestring])
+...
+&gt;&gt;&gt; decode_utf8_bytes_to_str_wrong(&#34;奶龙&#34;.encode(&#34;utf-8&#34;))
+Traceback (most recent call last):
+  File &#34;&lt;python-input-0&gt;&#34;, line 4, in &lt;module&gt;
+    decode_utf8_bytes_to_str_wrong(&#34;奶龙&#34;.encode(&#34;utf-8&#34;))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File &#34;&lt;python-input-0&gt;&#34;, line 2, in decode_utf8_bytes_to_str_wrong
+    return &#34;&#34;.join([bytes([b]).decode(&#34;utf-8&#34;) for b in bytestring])
+                    ~~~~~~~~~~~~~~~~~^^^^^^^^^
+UnicodeDecodeError: &#39;utf-8&#39; codec can&#39;t decode byte 0xe5 in position 0: unexpected end of data
+&gt;&gt;&gt; [f&#34;0x{c:02x}&#34; for c in list(&#34;奶龙&#34;.encode(&#34;utf-8&#34;))]
+[&#39;0xe5&#39;, &#39;0xa5&#39;, &#39;0xb6&#39;, &#39;0xe9&#39;, &#39;0xbe&#39;, &#39;0x99&#39;]
+</code></pre>
+      </div>
+    </details>
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>Give a two-byte sequence that does not decode to any Unicode character(s).</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answer</strong>: <code>0x80 0x80</code></p>
+<pre tabindex="0"><code class="language-pycon" data-lang="pycon">&gt;&gt;&gt; bytes([0x80, 0x80]).decode(&#39;utf-8&#39;)
+Traceback (most recent call last):
+  File &#34;&lt;python-input-17&gt;&#34;, line 1, in &lt;module&gt;
+    bytes([0x80, 0x80]).decode(&#39;utf-8&#39;)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+UnicodeDecodeError: &#39;utf-8&#39; codec can&#39;t decode byte 0x80 in position 0: invalid start byte
+</code></pre><p>I assume that the <strong>decode</strong> means $\text{UTF-8}$ decoding here.
+For byte values in $\text{UTF-8}$, we can categorize them into 5 types:</p>
+<ul>
+<li><code>0xxxxxxx</code> (<code>0x00</code>–<code>0x7F</code>): single-byte character (ASCII)</li>
+<li><code>110xxxxx</code> (<code>0xC0</code>–<code>0xDF</code>): start of a 2-byte sequence</li>
+<li><code>1110xxxx</code> (<code>0xE0</code>–<code>0xEF</code>): start of a 3-byte sequence</li>
+<li><code>11110xxx</code> (<code>0xF0</code>–<code>0xF7</code>): start of a 4-byte sequence</li>
+<li><code>10xxxxxx</code> (<code>0x80</code>–<code>0xBF</code>): continuation byte (not valid as a starting byte)</li>
+</ul>
+<p>We can consider a <strong>valid</strong> utf-8 character encoding as one of the following forms:</p>
+<ol>
+<li>ASCII sequence;</li>
+<li><code>start of an n-byte sequence</code> + <code>n-1 continuation bytes</code>.</li>
+</ol>
+<p>Any other sequences that <strong>do not follow</strong> these forms are <strong>invalid</strong>, so it&rsquo;s pretty easy to construct one.</p>
+      </div>
+    </details>
+      </div>
+    </details>
+    <details class="admonition note">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span>Problem (<code>train_bpe</code>):  BPE Tokenizer Training (15 points)</span>
+      </summary>
+      <div class="admonition-content">
+        
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>Deliverable: Write a function that, given a path to an input text file, trains a (byte-level) BPE tokenizer</span>
+      </summary>
+      <div class="admonition-content">
+        <p>To test, run:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>uv run pytest tests/test_train_bpe.py
+</span></span></code></pre></div><p>To run the trainer, use:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>uv run python cs336_basics/tokenizer/bpe_trainer.py <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#ae81ff"></span>		--input_path <span style="color:#e6db74">&#34;./data/TinyStoriesV2-GPT4-train.txt&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#ae81ff"></span>		--vocab_size <span style="color:#ae81ff">10000</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#ae81ff"></span>		--desired_num_chunks <span style="color:#ae81ff">512</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#ae81ff"></span>		--save_dir <span style="color:#e6db74">&#34;./output/tokenizer/TinyStories&#34;</span>
+</span></span></code></pre></div><p>It would be great if I implement the trainer in C++ in the future. 🥸</p>
+      </div>
+    </details>
+      </div>
+    </details>
+    <details class="admonition note">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span>Problem (<code>train_bpe_tinystories</code>):  BPE Training on TinyStories (2 points)</span>
+      </summary>
+      <div class="admonition-content">
+        
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>Train a byte-level BPE tokenizer on the TinyStories dataset, using a maximum vocabulary size of 10,000. Make sure to add the TinyStories <code>&lt;|endoftext|&gt;</code> special token to the vocabulary. Serialize the resulting vocabulary and merges to disk for further inspection. How much time and memory did training take? What is the longest token in the vocabulary? Does it make sense?</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answers</strong>:</p>
+<ul>
+<li>It took about 30 seconds. I didn&rsquo;t track the memory. Probably a few GBs.</li>
+<li>The longest token is <code>b' accomplishment'</code>, length=15.</li>
+<li>I think it makes sense. It&rsquo;s a valid word.</li>
+</ul>
+      </div>
+    </details>
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>Profile your code. What part of the tokenizer training process takes the most time?</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answer</strong>:
+The most time-consuming part is <strong>pre-tokenization stage</strong> (about <strong>80%</strong> of all time), specifically:</p>
+<ul>
+<li><code>finditer</code> $\approx$ 45.1%;</li>
+<li><code>word = match.group(0)</code> $\approx$ 8.5%;</li>
+<li><code>word2count[word] += 1</code> $\approx$ 23.4%;</li>
+</ul>
+      </div>
+    </details>
+      </div>
+    </details>
+    <details class="admonition note">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span>Problem (<code>train_bpe_expts_owt</code>):  BPE Training on OpenWebText (2 points)</span>
+      </summary>
+      <div class="admonition-content">
+        
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>Train a byte-level BPE tokenizer on the OpenWebText dataset, using a maximum vocabulary size of 32,000. Serialize the resulting vocabulary and merges to disk for further inspection. What is the longest token in the vocabulary? Does it make sense?</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answers</strong>:</p>
+<ul>
+<li>The training took about 2min53s(pre-tokenize) + 4min15s(merging) = 7min8s(total).</li>
+<li>The longest token is <code>b'\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82'</code>, length=64.</li>
+<li>We can use <code>grep</code> to check this token:</li>
+</ul>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>sh&gt; LONGEST_TOKEN<span style="color:#f92672">=</span><span style="color:#e6db74">$&#39;\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82&#39;</span>
+</span></span><span style="display:flex;"><span>sh&gt; grep -a -m <span style="color:#ae81ff">1</span> <span style="color:#e6db74">${</span>LONGEST_TOKEN<span style="color:#e6db74">}</span> ./data/owt_train.txt
+</span></span><span style="display:flex;"><span>Subject: How bout the sound Who cares how great the show is <span style="color:#66d9ef">if</span> you canÃÂÃÂÃÂÃ ... ÃÂÃÂÃÂÃÂt hear it. Sounds like it was recorded at the bottom of my swimming pool, <span style="color:#ae81ff">1</span> star. If your a collector <span style="color:#66d9ef">then</span> <span style="color:#f92672">(</span>because it<span style="color:#e6db74">&#39;s brent&#39;</span>s first show<span style="color:#f92672">)</span> it might be worth the download. If you want good music, favor yourself and skip it. - January 7, 2005How bout the sound
+</span></span></code></pre></div><ul>
+<li>I think it makes sense because at least it exists in the data. It just learned some corrupted token from corrupted text.</li>
+</ul>
+      </div>
+    </details>
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>Compare and contrast the tokenizer that you get training on TinyStories versus OpenWebText.</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answers</strong>: I think I need to write a small script to compare the results. I&rsquo;ll do it later.</p>
+      </div>
+    </details>
+      </div>
+    </details>
+    <details class="admonition note">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span>Problem (<code>tokenizer</code>):  Implementing the tokenizer (15 points)</span>
+      </summary>
+      <div class="admonition-content">
+        
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>Deliverable: Implement a <code>Tokenizer</code> class that, given a vocabulary and a list of merges, encodes text into integer IDs and decodes integer IDs into text. Your tokenizer should also support user-provided special tokens (appending them to the vocabulary if they aren’t already there).</span>
+      </summary>
+      <div class="admonition-content">
+        <p>To test, run:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>uv run pytest tests/test_tokenizer.py
+</span></span></code></pre></div><p>To do the following experiments, run:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>uv run python cs336_basics/tokenizer/bpe_tokenizer.py
+</span></span></code></pre></div>
+      </div>
+    </details>
+      </div>
+    </details>
+    <details class="admonition note">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><path d="M0 64C0 28.7 28.7 0 64 0L224 0l0 128c0 17.7 14.3 32 32 32l128 0 0 125.7-86.8 86.8c-10.3 10.3-17.5 23.1-21 37.2l-18.7 74.9c-2.3 9.2-1.8 18.8 1.3 27.5L64 512c-35.3 0-64-28.7-64-64L0 64zm384 64l-128 0L256 0 384 128zM549.8 235.7l14.4 14.4c15.6 15.6 15.6 40.9 0 56.6l-29.4 29.4-71-71 29.4-29.4c15.6-15.6 40.9-15.6 56.6 0zM311.9 417L441.1 287.8l71 71L382.9 487.9c-4.1 4.1-9.2 7-14.9 8.4l-60.1 15c-5.5 1.4-11.2-.2-15.2-4.2s-5.6-9.7-4.2-15.2l15-60.1c1.4-5.6 4.3-10.8 8.4-14.9z"/></svg>
+        <span>Problem (<code>tokenizer_experiments</code>):  Experiments with tokenizers (4 points)</span>
+      </summary>
+      <div class="admonition-content">
+        
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>Sample 10 documents from TinyStories and OpenWebText. Using your previously-trained TinyStories and OpenWebText tokenizers (10K and 32K vocabulary size, respectively), encode these sampled documents into integer IDs. What is each tokenizer’s compression ratio (bytes/token)?</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answers</strong>: I used 3 documents for shorter runtime.</p>
+<ul>
+<li>TinyStories: <strong>4.1158</strong> bytes/token;</li>
+<li>owt: <strong>4.3654</strong> bytes/token;</li>
+</ul>
+      </div>
+    </details>
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>What happens if you tokenize your OpenWebText sample with the TinyStories tokenizer? Compare the compression ratio and/or qualitatively describe what happens.</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answer</strong>:
+The compression ratio drops by about <strong>a quarter</strong>(4.3654 bytes/token -&gt; 3.1727 bytes/token).
+Here&rsquo;s a comprehensive comparison:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Dataset</th>
+          <th>Tokenizer</th>
+          <th>Speed</th>
+          <th>Bytes/Token</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>TinyStories</td>
+          <td>TinyStories</td>
+          <td>17.4161 MB/s</td>
+          <td>4.1158 bytes/token</td>
+      </tr>
+      <tr>
+          <td>TinyStories</td>
+          <td>owt</td>
+          <td>17.3404 MB/s</td>
+          <td>4.0051 bytes/token</td>
+      </tr>
+      <tr>
+          <td>owt</td>
+          <td>TinyStories</td>
+          <td>6.0720 MB/s</td>
+          <td>3.1727 bytes/token</td>
+      </tr>
+      <tr>
+          <td>owt</td>
+          <td>owt</td>
+          <td>5.4671 MB/s</td>
+          <td>4.3654 bytes/token</td>
+      </tr>
+  </tbody>
+</table>
+      </div>
+    </details>
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>Estimate the throughput of your tokenizer (e.g., in bytes/second). How long would it take to tokenize the Pile dataset (825GB of text)?</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answers</strong>:</p>
+<p>The throughput depends on both the tokenizer and the dataset to be tokenized:</p>
+<ul>
+<li>TinyStories $\approx$ <strong>18 MB/s</strong>;</li>
+<li>owt $\approx$ <strong>5.5 MB/s</strong>;</li>
+</ul>
+<p>Tokenize runtime:</p>
+<ul>
+<li>TinyStories: 825 GB / 18 MB/s $\approx$ <strong>13</strong> hours;</li>
+<li>owt: 825 GB / 5.5 MB/s $\approx$ <strong>42.6</strong> hours;</li>
+</ul>
+      </div>
+    </details>
+    <details class="admonition question">
+      <summary class="admonition-header"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM169.8 165.3c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg>
+        <span>Using your TinyStories and OpenWebText tokenizers, encode the respective training and development datasets into a sequence of integer token IDs. We’ll use this later to train our language model. We recommend serializing the token IDs as a NumPy array of datatype <code>uint16</code>. Why is <code>uint16</code> an appropriate choice?</span>
+      </summary>
+      <div class="admonition-content">
+        <p><strong>Answer</strong>: <code>uint16</code> is of range [0, 65535]. Since our vocabulary is at most 32000, <code>uint16</code> would suffice to represent the token IDs.</p>
+      </div>
+    </details>
+      </div>
+    </details>
 
   </div>
 
@@ -551,7 +1064,7 @@ The merges list is initialized as an empty list.</p>
         </main>
         
 <footer class="footer">
-        <span>&copy; 2026 <a href="https://aoblex.github.io/">trytry&#39;s blog</a></span> · 
+    <span>&copy; 2026 <a href="https://aoblex.github.io/">trytry&#39;s blog</a></span> · 
 
     <span>
         Powered by
@@ -575,7 +1088,7 @@ The merges list is initialized as an empty list.</p>
         if (scrollPosition) {
             menu.scrollLeft = parseInt(scrollPosition, 10);
         }
-        
+
         menu.onscroll = function () {
             localStorage.setItem("menu-scroll-position", menu.scrollLeft);
         }
@@ -641,9 +1154,24 @@ The merges list is initialized as an empty list.</p>
             }, 2000);
         }
 
+        function getCopyText(codeblock) {
+            const isPyConsole = codeblock.className.includes('language-pycon');
+
+            if (!isPyConsole) {
+                return codeblock.textContent;
+            }
+
+            return codeblock.textContent
+                .split('\n')
+                .filter(line => /^(>>>|\.\.\.) ?/.test(line))
+                .map(line => line.replace(/^(>>>|\.\.\.) ?/, ''))
+                .join('\n')
+                .trimEnd();
+        }
+
         copybutton.addEventListener('click', (cb) => {
             if ('clipboard' in navigator) {
-                navigator.clipboard.writeText(codeblock.textContent);
+                navigator.clipboard.writeText(getCopyText(codeblock));
                 copyingDone();
                 return;
             }
@@ -672,7 +1200,6 @@ The merges list is initialized as an empty list.</p>
             codeblock.parentNode.appendChild(copybutton);
         }
     });
-</script>
-</body>
+</script></body>
 
 </html>
