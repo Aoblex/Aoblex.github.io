@@ -255,19 +255,16 @@ The core data structures are:
 
 ### Profiling
 
-I use [`scalene`](https://github.com/plasma-umass/scalene) to profile.
-The experiment settings are:
-* data: `TinyStoriesV2-GPT4-train.txt`;
-* vocab_size: `10000`;
-* desired_num_chunks: `512`;
-* max_workers: `None`;
+I use [`py-spy`](https://github.com/plasma-umass/scalene) to profile.
 
-In the profile figure below, the five columns correspond to
-- line number;
-- time python;
-- native;
-- system;
-- await / %;
+```bash
+uv run py-spy record --subprocesses \
+    -o "output/profile/TinyStories.svg" \
+    -- python cs336_basics/tokenizer/bpe.py \
+            --input_path "./data/TinyStoriesV2-GPT4-train.txt" \
+            --vocab_size 10000 \
+            --desired_num_chunks 512
+```
 
 {{< figure
     src="./figures/bpe-profile.png"
@@ -277,10 +274,56 @@ In the profile figure below, the five columns correspond to
     align="center"
 >}}
 
-The result shows that **the pre-tokenization stage** took **93.42%** (3m:38.141s) out of 3m:49.281s, and the **merge iterations** took only about **6.13%** of all time.
+In the left most block contains details about the `train` method(line 258), specifically:
+* **initialization(line 203)**: time consumed in pre-tokenization;
+* **merge iterations(line 219)**: time consumed in applying pair merge;
 
-> [!caution]- Using scalene with multiprocessing
-> To uses these together, I need to set context to `mp.get_context("fork")` and add the scalene flag `--cpu-only`, so only time is profiled.
+{{< figure
+    src="./figures/bpe-profile1.png"
+    alt="Merge Iterations"
+    caption="Merge Iterations"
+    width="800"
+    align="center"
+>}}
+
+The following two blocks is about **multiprocessing**:
+
+{{< figure
+    src="./figures/bpe-profile2.png"
+    alt="Process Communication"
+    caption="Process Communication"
+    width="800"
+    align="center"
+>}}
+
+{{< figure
+    src="./figures/bpe-profile3.png"
+    alt="Resource Tracker"
+    caption="Resource Tracker"
+    width="800"
+    align="center"
+>}}
+
+The remaining 10 blocks (my computer has 10 cores) is about **each process**.
+Specifically, what they do is to pre-tokenize and then build the word2count dictionary.
+
+{{< figure
+    src="./figures/bpe-profile4.png"
+    alt="Resource Tracker"
+    caption="Resource Tracker"
+    width="800"
+    align="center"
+>}}
+
+> [!note]- On the choice of profiler
+> I tried to use [`scalene`](https://github.com/plasma-umass/scalene) at first, but it seems that it's problematic with multiprocessing.
+> So I switched to [`py-spy`](https://github.com/benfred/py-spy). It's based on sampling and its overhead is very low.
+>
+> **Summary:**
+>
+> - `scalene`: best for line-level insight, but less stable with multiprocessing
+> - `py-spy`: most robust, ideal for understanding system-level bottlenecks
+> - `cProfile`: precise function-level stats, but limited for multiprocessing and no memory support
 
 ---
 
