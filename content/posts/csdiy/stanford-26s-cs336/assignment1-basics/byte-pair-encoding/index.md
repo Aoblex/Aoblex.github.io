@@ -255,58 +255,7 @@ The core data structures are:
 
 ### Profiling
 
-Run this command to first generate a profile:
-
-```bash
-uv run python -m cProfile \
-    -o profile/tinystories-10000.out \
-    -m cs336_basics.tokenizer.bpe
-```
-
-Then use this command to see the results:
-
-```bash
-uv run python -m pstats profile/tinystories-10000.out <<'EOF'
-strip
-sort cumtime
-stats bpe
-EOF
-```
-
-And here's the result:
-
-```txt
-Welcome to the profile statistics browser.
-profile/tinystories-10000.out% profile/tinystories-10000.out% profile/tinystories-10000.out% Tue Apr 28 00:04:52 2026    profile/tinystories-10000.out
-
-         18208896 function calls (18064111 primitive calls) in 147.210 seconds
-
-   Ordered by: cumulative time
-   List reduced from 2005 to 12 due to restriction <'bpe'>
-
-   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
-        1    0.000    0.000  147.274  147.274 bpe.py:1(<module>)
-        1    0.124    0.124  147.231  147.231 bpe.py:175(train)
-     9743    0.768    0.000   65.416    0.007 bpe.py:116(apply_merge)
-        1    0.190    0.190   49.611   49.611 bpe.py:70(initialize)
-   277780    1.020    0.000    1.525    0.000 bpe.py:36(_word_merge)
-     9743    0.037    0.000    0.206    0.000 bpe.py:109(get_merge_pair)
-    10000    0.006    0.000    0.008    0.000 bpe.py:166(add_token)
-     9743    0.004    0.000    0.006    0.000 bpe.py:171(add_merge)
-        1    0.000    0.000    0.001    0.001 bpe.py:148(__init__)
-        1    0.000    0.000    0.001    0.001 bpe.py:18(__init__)
-        1    0.000    0.000    0.000    0.000 bpe.py:17(BPECorpus)
-        1    0.000    0.000    0.000    0.000 bpe.py:144(BPETrainer)
-
-
-profile/tinystories-10000.out%
-Goodbye.
-```
-
-The total training cost about 147 seconds.
-It is clear that the main bottleneck lies in `initialize`(49.6s) and `apply_merge`(65.4s), which correspond to the pre-tokenization and merge iterations respectively.
-
-To further inspect the details, we can use `callees initialize` or `callees apply_merge`. But I think I'll stop here.
+TODO
 
 ---
 
