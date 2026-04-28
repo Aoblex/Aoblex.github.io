@@ -1,7 +1,8 @@
-
 +++
 title = 'Byte Pair Encoding'
 date = '2026-04-16T20:31:41+08:00'
+summary = 'Train a BPE tokenizer from scratch! 🤓'
+weight = 10
 draft = false
 +++
 
@@ -284,7 +285,7 @@ uv run py-spy record --subprocesses \
 
 The left most block contains details about the `train` method([line 290](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L290)), specifically:
 * **initialization**([line 229](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L229)): time consumed in pre-tokenization;
-* **merge iterations([line 246](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L246))**: time consumed in applying pair merge;
+* **merge iterations**([line 246](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L246)): time consumed in applying pair merge;
 
 {{< figure
     src="./figures/bpe-profile/train.png"
@@ -361,7 +362,7 @@ BPE Encoding could be considered as a **replay** of the training process:
 1. Split by special tokens (remember to keep them!);
 2. Split by regular expression (must use the same expression as in training);
 3. Tokenize the words we got in step 2:
-    1. A non-special-token word is initially byte-level tokenized. For special tokens, convert to token id directly!;
+    1. A non-special-token word is initially byte-level tokenized. For special tokens, convert to token id directly;
     2. Find the token pair in current word with **the smallest merge rank**;
         - merge rank means the index of this pair in merges list;
         - break if no token pair is in the merges list;
@@ -568,9 +569,10 @@ Here are my solutions to the problems given in the writeup.
 > > [!question]- Estimate the throughput of your tokenizer (e.g., in bytes/second). How long would it take to tokenize the Pile dataset (825GB of text)?
 > > **Answers**:
 > >
-> > The throughput depends on both the tokenizer and the dataset to be tokenized:
-> > - TinyStories $\approx$ **18 MB/s**;
-> > - owt $\approx$ **5.5 MB/s**;
+> > The throughput depends on both the tokenizer and the dataset to be tokenized. Probably because of the document length or text distribution?
+> > Here's their performance
+> > - On TinyStories data $\approx$ **18 MB/s**;
+> > - On owt data $\approx$ **5.5 MB/s**;
 > >
 > >
 > > Tokenize runtime:
@@ -578,4 +580,4 @@ Here are my solutions to the problems given in the writeup.
 > > - owt: 825 GB / 5.5 MB/s $\approx$ **42.6** hours;
 >
 > > [!question]- Using your TinyStories and OpenWebText tokenizers, encode the respective training and development datasets into a sequence of integer token IDs. We’ll use this later to train our language model. We recommend serializing the token IDs as a NumPy array of datatype `uint16`. Why is `uint16` an appropriate choice?
-> > **Answer**: `uint16` is of range [0, 65535]. Since our vocabulary is at most 32000, `uint16` would suffice to represent the token IDs.
+> > **Answer**: `uint16` is of range [0, 65535]. Since our vocabulary is at most 32000, `uint16` would suffice to represent all token IDs.
