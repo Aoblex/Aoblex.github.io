@@ -441,3 +441,33 @@ Here are part of my solutions to the problems given in the writeup.
 > > 2. `start of an n-byte sequence` + `n-1 continuation bytes`.
 > >
 > > Any other sequences that **do not follow** these forms are **invalid**, so it's pretty easy to construct one.
+
+> [!note]- Problem (`train_bpe_tinystories`):  BPE Training on TinyStories (2 points)
+> > [!question]- Train a byte-level BPE tokenizer on the TinyStories dataset, using a maximum vocabulary size of 10,000. Make sure to add the TinyStories `<|endoftext|>` special token to the vocabulary. Serialize the resulting vocabulary and merges to disk for further inspection. How much time and memory did training take? What is the longest token in the vocabulary? Does it make sense?
+> > **Answers**:
+> > - It took about 30 seconds. I didn't track the memory. Probably a few GBs.
+> > - The longest token is `b' accomplishment'`, length=15.
+> > - I think it makes sense. It's a valid word.
+>
+> > [!question]- Profile your code. What part of the tokenizer training process takes the most time?
+> > **Answer**:
+> > The most time-consuming part is **pre-tokenization stage** (about **80%** of all time), specifically:
+> > - `finditer` $\approx$ 45.1%;
+> > - `word = match.group(0)` $\approx$ 8.5%;
+> > - `word2count[word] += 1` $\approx$ 23.4%;
+
+> [!note]- Problem (`train_bpe_expts_owt`):  BPE Training on OpenWebText (2 points)
+> > [!question]- Train a byte-level BPE tokenizer on the OpenWebText dataset, using a maximum vocabulary size of 32,000. Serialize the resulting vocabulary and merges to disk for further inspection. What is the longest token in the vocabulary? Does it make sense?
+> > **Answers**:
+> > - The training took about 2min53s(pre-tokenize) + 4min15s(merging) = 7min8s(total).
+> > - The longest token is `b'\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82'`, length=64.
+> > - We can use `grep` to check this token:
+> > ```bash
+> > sh> LONGEST_TOKEN=$'\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82'
+> > sh> grep -a -m 1 ${LONGEST_TOKEN} ./data/owt_train.txt
+> > Subject: How bout the sound Who cares how great the show is if you canÃÂÃÂÃÂÃ ... ÃÂÃÂÃÂÃÂt hear it. Sounds like it was recorded at the bottom of my swimming pool, 1 star. If your a collector then (because it's brent's first show) it might be worth the download. If you want good music, favor yourself and skip it. - January 7, 2005How bout the sound
+> > ```
+> > - I think it makes sense because at least it exists in the data. It just learned some corrupted token from corrupted text.
+>
+> > [!question]- Compare and contrast the tokenizer that you get training on TinyStories versus OpenWebText.
+> > **Answers**: I think I need to write a small script to compare the results. I'll do it later.
