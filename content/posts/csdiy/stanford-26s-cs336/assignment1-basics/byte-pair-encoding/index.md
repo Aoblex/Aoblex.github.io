@@ -1,15 +1,34 @@
 +++
-title = 'Byte Pair Encoding'
+title = 'Section 1: Byte Pair Encoding'
 date = '2026-04-16T20:31:41+08:00'
 summary = 'Train a BPE tokenizer from scratch! 🤓'
 weight = 10
 draft = false
 +++
 
+# Introduction
 
-Before training a LLM, we will need a tokenizer to convert the raw text input to discrete token ids and then map to embeddings for the model to process.
+To training an LLM, we will need a tokenizer to tokenize the raw text input to discrete token ids and then map them to embeddings for the model to process.
 
-In this section, we will use **the Unicode Standard** and train a **BPE** tokenizer.
+However, with different encodings standards, the same text can have different byte representations, which lead to different token representations and therefore different embeddings. For example:
+
+```pycon
+>>> "你好".encode(encoding="utf-8")
+b'\xe4\xbd\xa0\xe5\xa5\xbd'
+>>> "你好".encode(encoding="utf-16")
+b'\xff\xfe`O}Y'
+>>> "你好".encode(encoding="utf-32")
+b'\xff\xfe\x00\x00`O\x00\x00}Y\x00\x00'
+>>> "你好".encode(encoding="GB2312")
+b'\xc4\xe3\xba\xc3'
+```
+
+So to bridge the gap between raw input (a bulk of text) and the model input (a list of integer token ids), we will need two components: an **encoding standard** and a **tokenizer**.
+
+In this assignment, we will focus on:
+
+1. **Encoding** text with the **UTF-8** standard;
+2. **Tokenizing** encoded text with a **BPE** tokenizer.
 
 ---
 
@@ -38,6 +57,8 @@ $$
 ```
 
 In general, we can consider it as **a giant table that maps each character to a unique integer**, called a _code point_. Current [Unicode 17](https://www.unicode.org/versions/Unicode17.0.0/) has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 [planes](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-2/#G16433), each with 65,536 code points).
+
+It is worth noting that [the internal representation of python string is a list unicode code points with a compact representation](https://stackoverflow.com/questions/1838170/what-is-internal-representation-of-string-in-python-3-x).
 
 ---
 
@@ -580,4 +601,4 @@ Here are my solutions to the problems given in the writeup.
 > > - owt: 825 GB / 5.5 MB/s $\approx$ **42.6** hours;
 >
 > > [!question]- Using your TinyStories and OpenWebText tokenizers, encode the respective training and development datasets into a sequence of integer token IDs. We’ll use this later to train our language model. We recommend serializing the token IDs as a NumPy array of datatype `uint16`. Why is `uint16` an appropriate choice?
-> > **Answer**: `uint16` is of range [0, 65535]. Since our vocabulary is at most 32000, `uint16` would suffice to represent all token IDs.
+> > **Answer**: `uint16` is of range $[0, 65535]$. Since our vocabulary is at most $32000$, `uint16` would suffice to represent all token IDs.
