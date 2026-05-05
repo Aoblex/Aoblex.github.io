@@ -72,6 +72,8 @@ class Linear(nn.Module):
 
 Note that we do not include a bias term, following most modern LLMs.
 
+---
+
 ## Embedding Module
 
 Mathematical notation:
@@ -86,9 +88,11 @@ The forward function:
 class Embedding(nn.Module):
     def forward(
         self,
-        token_ids: Int[torch.LongTensor, "batch seqlen"],
-    ) -> Float[torch.Tensor, "batch seqlen d_model"]: ...
+        token_ids: Int[torch.Tensor, "batch seqlen"],
+    ) -> Float[torch.Tensor, "batch seqlen d_model"]:
 ```
+
+---
 
 ## RMSNorm: Root Mean Square Layer Normalization
 
@@ -112,6 +116,8 @@ class RMSNorm(nn.Module):
         x: Float[torch.Tensor, "... d_model"],
     ) -> Float[torch.Tensor, "... d_model"]: ...
 ```
+
+---
 
 ## SwiGLU: Sigmoid Linear Unit + Gated Linear Unit
 
@@ -155,6 +161,8 @@ class SwiGLU(nn.Module):
         x: Float[torch.Tensor, "... d_model"],
     ) -> Float[torch.Tensor, "... d_model"]:
 ```
+
+---
 
 ## RoPE: Relative Positional Embeddings
 
@@ -227,6 +235,8 @@ class RoPE(nn.Module):
     ) -> Float[torch.Tensor, "... seqlen d_k"]: ...
 ```
 
+---
+
 ## SDPA: Scaled Dot-Product Attention
 
 Scaled dot-product attention is defined as:
@@ -247,6 +257,8 @@ class ScaledDotProductAttention(nn.Module):
         mask: Bool[torch.Tensor, "... queries keys"] | None = None,
     ) -> Float[torch.Tensor, "... queries d_v"]: ...
 ```
+
+---
 
 ## MHA: Causal Multi-Head Self-Attention With RoPE
 
@@ -275,6 +287,202 @@ class MultiheadSelfAttentionWithRoPE(nn.Module):
         self,
         x: Float[torch.Tensor, "... seqlen d_model"],
         token_positions: Int[torch.Tensor, "... seqlen"],
-        mask: Bool[torch.Tensor, "... seqlen seqlen"] | None = None,
     ) -> Float[torch.Tensor, "... seqlen d_model"]:
 ```
+
+---
+
+## Transformer Block
+
+The structure of a transformer block is shown [here](#transformer-lm).
+
+```python
+class TransformerBlock(nn.Module):
+    def forward(
+        self,
+        x: Float[torch.Tensor, "... seqlen d_model"],
+        token_positions: Int[torch.Tensor, "... seqlen"],
+        mask: Bool[torch.Tensor, "... seqlen seqlen"] | None = None,
+    ) -> Float[torch.Tensor, "... seqlen d_model"]:
+        x = x + self.attn(self.ln1(x), token_positions, mask)
+        x = x + self.ffn(self.ln2(x))
+        return x
+```
+
+---
+
+## Transformer LM
+
+Put all these components together and we can get the full transformer model:
+
+```python
+class Transformer(nn.Module):
+    def forward(
+        self,
+        x: Int[torch.Tensor, "batch seqlen"],
+        token_positions: Int[torch.Tensor, "batch seqlen"],
+    ) -> Float[torch.Tensor, "batch seqlen vocab"]:
+        x = self.token_embeddings(x)
+        for layer in self.layers:
+            x = layer(x, token_positions)
+        x = self.ln_final(x)
+        x = self.lm_head(x)
+        return x
+```
+
+---
+
+# Resource Accounting
+
+Here we do a comprehensive resource accounting for the entire transformer model, including **compute** and **memory**.
+For now we ignore the $\text{batch}$ dimension and assume that the input is of length $\text{n}$.
+
+Notations:
+
+- $n$: input sequence length;
+
+- $d$: dimension of the model;
+
+- $d_{\text{ff}}$: dimension in FFN up projection;
+
+- $h$: number of attention heads;
+
+- $v$: size of vocabulary;
+
+- $L$: number of layers;
+
+## Compute
+
+{{< collapse summary="Transformer" >}}
+
+{{< collapse summary="Embedding Layer" >}}
+This operation consists only of indexing (lookup) and is dominated by memory access rather than floating-point arithmetic.
+
+total: **0 FLOPS**.
+{{< /collapse >}}
+
+{{< collapse summary="Transformer Block" >}}
+
+```python
+x = x + self.attn(self.ln1(x), token_positions)
+x = x + self.ffn(self.ln2(x))
+```
+
+{{< collapse summary="Attention" >}}
+
+- $x_{\text{ln1}} = \text{ln1}(x)$:
+    - $A = \sqrt{\frac{1}{d}\sum_i (x_i)^2 + \varepsilon} \approx 2nd$ FLOPs;
+    - ${(x_{\text{ln1}})}_{i} = \frac{x_i g_i}{A} \approx 2nd$ FLOPs;
+    - Total: $4nd$ FLOPs;
+- $x_{\text{attn}} = x + \text{attn}(x_{\text{ln1}}, \text{token\\_positions})$:
+    - $Q/K/V = W_{Q/K/V} x_{\text{ln1}} \approx 3 \times 2nd^2 = 6 nd^2$ FLOPs;
+    - Reshape $Q/K/V: (n, d) \rightarrow (h, n, d^\prime) = 0$ FLOPs;
+    - $Q/K = \text{RoPE}(Q/K, \text{token\\_positions}) \approx h \times 4nd^{\prime} = 4nd$ FLOPs;
+    - $x_{\text{scores}} = QK^T / \sqrt{d'} \approx 2 h n^2 d^{\prime} = 2 n^2 d$ FLOPs;
+    - $x_{\text{weights}} = \text{softmax}(x_{\text{scores}}) \approx 3 h n^2$ FLOPs;
+    - $x_{\text{out}}= (\text{reshape}(x_{\text{weights}} V)) O \approx 2hn^2d^{\prime} + 2nd^2 = 2n^2d + 2nd^2$ FLOPs;
+    - $x_{\text{attn}} = x + x_{\text{out}} \approx nd$ FLOPs;
+    - Total: $(4d+3h)n^2+(5d+8d^2)n$ FLOPs;
+
+{{< /collapse >}}
+
+{{< collapse summary="FFN" >}}
+
+- $x_{\text{ln2}} = \text{ln2}(x)$:
+    - Total: $4nd$ FLOPs;
+- $x_{\text{ffn}} = x + \text{ffn}(x_{\text{ln2}})$
+    - $x_{\text{act}} = W_3 x_{\text{ln2}} \approx 2ndd_{\text{ff}}$ FLOPs;
+    - $x_{\text{gates}} = \text{SiLU}(W_1 x_{\text{ln2}}) \approx 2ndd_{\text{ff}} + 4 n d_{\text{ff}}$ FLOPs;
+    - $x_{\text{up}} = x_{\text{act}} \odot x_{\text{gates}} \approx nd_{\text{ff}}^2$ FLOPs;
+    - $x_{\text{out}} = W_2 x_{\text{up}} \approx 2nd_{\text{ff}}d$ FLOPs;
+    - $x_{\text{ffn}} = x + x_{\text{out}} \approx nd$ FLOPs;
+    - Total: $(d_{\text{ff}}^2 + 6d_{\text{ff}}d + 4 d_{\text{ff}} + d) n$ FLOPs;
+
+{{< /collapse >}}
+
+{{< /collapse >}}
+
+{{< collapse summary="Out Norm" >}}
+
+- $x_{\text{ln\\_final}} = \text{ln\\_final}(x)$
+    - Total: $4nd$ FLOPs;
+
+{{< /collapse >}}
+
+{{< collapse summary="LM Head" >}}
+- $x_{\text{lm}} = W_{\text{lm}}(x)$
+    - Total: $2ndv$ FLOPs;
+{{< /collapse >}}
+
+{{< /collapse >}}
+
+Sum them up:
+
+$$
+\begin{align*}
+\text{FLOPS} = &L\left\{ \left[ (4d+3h)n^2 + (9d+8d^2)n \right] + (d_{\text{ff}}^2+6d_{\text{ff}}d+4d_{\text{ff}}+5d)n \right\} \\
+               &+ 4nd + 2ndv
+\end{align*}
+$$
+
+
+## Memory
+
+{{< collapse summary="Transformer" >}}
+
+{{< collapse summary="Embedding Layer" >}}
+
+- embedding matrix: $\text{Float}[v, d]$;
+- size: $vd \times 4 \text{ bytes} = 4vd \text{ bytes}$;
+
+{{< /collapse >}}
+
+{{< collapse summary="Transformer Block" >}}
+
+- $\text{ln1/2}$: $\text{Float}[d]$;
+- size: $8d \text{ bytes}$
+
+{{< collapse summary="Attention" >}}
+
+- $W_{Q/K/V/O}$: $\text{Float}[d, d]$;
+- $\text{mask}$: $\text{Bool}[n, n]$;
+- $\text{RoPE}$:
+    - $\cos$: $\text{Float}[n, \frac{d^{\prime}}{2}]$;
+    - $\sin$: $\text{Float}[n, \frac{d^{\prime}}{2}]$;
+- size: $16d^2 + \frac{n^2}{32} + 4nd^{\prime} \text{ bytes}$
+
+{{< /collapse >}}
+
+{{< collapse summary="FFN" >}}
+
+- $W_{1/3}$: $\text{Float}[d_{\text{ff}}, d]$;
+- $W_{2}$: $\text{Float}[d, d_{\text{ff}}]$;
+- size: $12 d d_{\text{ff}} \text{ bytes}$;
+
+{{< /collapse >}}
+
+{{< /collapse >}}
+
+{{< collapse summary="Out Norm" >}}
+
+- $\text{ln\\_final}$: $\text{Float}[d]$;
+- size: $4d \text{ bytes}$;
+
+{{< /collapse >}}
+
+{{< collapse summary="LM Head" >}}
+
+- $W_{\text{lm}}$: $\text{Float}[v, d]$;
+- size: $4dv \text{ byte}$;
+
+{{< /collapse >}}
+
+{{< /collapse >}}
+
+Sum them up:
+
+$$
+\begin{align*}
+\text{size} = 4vd + L(8d+16d^2+\frac{n^2}{32}+4nd^{\prime}+12dd_{\text{ff}})+4d+4vd \text{ bytes}
+\end{align*}
+$$
