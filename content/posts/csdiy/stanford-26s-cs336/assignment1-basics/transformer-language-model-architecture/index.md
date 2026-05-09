@@ -542,6 +542,152 @@ This parameter count does **not** include activation memory, gradients, optimize
 For example, a materialized causal mask uses $O(n^2)$ memory, and RoPE cosine/sine caches use $O(nd^{\prime})$ memory.
 During training, activations and optimizer states usually dominate the additional memory beyond the parameters.
 
+> [!code]- Resource accounting script
+> ```python
+> from rich.console import Console
+> from rich.panel import Panel
+> from rich.table import Table
+>
+>
+> def humanize_number(x: int | float) -> str:
+>     units = ["", "K", "M", "B", "T", "P", "E"]
+>     x = float(x)
+>     for unit in units:
+>         if abs(x) < 1000:
+>             return f"{x:,.2f}{unit}"
+>         x /= 1000
+>     return f"{x:,.2f}Z"
+>
+>
+> def humanize_bytes(num_bytes: int) -> str:
+>     units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]
+>     x = float(num_bytes)
+>     for unit in units:
+>         if abs(x) < 1024:
+>             return f"{x:,.2f} {unit}"
+>         x /= 1024
+>     return f"{x:,.2f} EiB"
+>
+>
+> def compute_resource(
+>     n: int,
+>     d: int,
+>     d_ff: int,
+>     h: int,
+>     v: int,
+>     L: int,
+>     *,
+>     bytes_per_param: int = 4,
+>     tied_embeddings: bool = False,
+>     save_svg_path: str | None = None,
+> ) -> dict[str, int]:
+>     if d % h != 0:
+>         raise ValueError(f"d={d} must be divisible by h={h}.")
+>
+>     d_head = d // h
+>     console = Console(record=save_svg_path is not None)
+>
+>     param_counts = {
+>         "Token embedding": v * d,
+>         "Attention projections": L * 4 * d**2,
+>         "SwiGLU FFN": L * 3 * d * d_ff,
+>         "RMSNorm": L * 2 * d + d,
+>         "LM head": 0 if tied_embeddings else v * d,
+>     }
+>     total_params = sum(param_counts.values())
+>     total_memory = total_params * bytes_per_param
+>
+>     flops = {
+>         "Attention projections": L * 8 * n * d**2,
+>         "Attention scores": L * 2 * n**2 * d,
+>         "Attention value mix": L * 2 * n**2 * d,
+>         "SwiGLU FFN": L * 6 * n * d * d_ff,
+>         "LM head": 2 * n * d * v,
+>     }
+>     total_flops = sum(flops.values())
+>
+>     console.print(
+>         Panel.fit(
+>             "\n".join([
+>                 f"[bold]n[/bold]={n:,}, [bold]d[/bold]={d:,}, "
+>                 f"[bold]d_ff[/bold]={d_ff:,}, [bold]h[/bold]={h:,}, "
+>                 f"[bold]d_head[/bold]={d_head:,}",
+>                 f"[bold]v[/bold]={v:,}, [bold]L[/bold]={L:,}, "
+>                 f"[bold]dtype bytes[/bold]={bytes_per_param}",
+>             ]),
+>             title="Transformer Resource Accounting",
+>             border_style="cyan",
+>         )
+>     )
+>
+>     param_table = Table(title="Parameter Memory", show_lines=True)
+>     param_table.add_column("Component", style="bold")
+>     param_table.add_column("Parameters", justify="right")
+>     param_table.add_column("Memory", justify="right")
+>     param_table.add_column("Share", justify="right")
+>     for name, count in param_counts.items():
+>         param_table.add_row(
+>             name,
+>             f"{count:,} ({humanize_number(count)})",
+>             humanize_bytes(count * bytes_per_param),
+>             f"{count / total_params:.2%}",
+>         )
+>     param_table.add_section()
+>     param_table.add_row(
+>         "[bold]Total[/bold]",
+>         f"[bold]{total_params:,} ({humanize_number(total_params)})[/bold]",
+>         f"[bold]{humanize_bytes(total_memory)}[/bold]",
+>         "[bold]100.00%[/bold]",
+>     )
+>     console.print(param_table)
+>
+>     flops_table = Table(title="Forward FLOPs", show_lines=True)
+>     flops_table.add_column("Component", style="bold")
+>     flops_table.add_column("FLOPs", justify="right")
+>     flops_table.add_column("Share", justify="right")
+>     for name, count in flops.items():
+>         flops_table.add_row(
+>             name,
+>             f"{count:,} ({humanize_number(count)})",
+>             f"{count / total_flops:.2%}",
+>         )
+>     flops_table.add_section()
+>     flops_table.add_row(
+>         "[bold]Total[/bold]",
+>         f"[bold]{total_flops:,} ({humanize_number(total_flops)})[/bold]",
+>         "[bold]100.00%[/bold]",
+>     )
+>     console.print(flops_table)
+>
+>     if save_svg_path is not None:
+>         console.save_svg(save_svg_path, title="Transformer Resource Accounting")
+>
+>     return {
+>         "total_params": total_params,
+>         "total_memory_bytes": total_memory,
+>         "total_flops": total_flops,
+>         **{f"params/{k}": v for k, v in param_counts.items()},
+>         **{f"flops/{k}": v for k, v in flops.items()},
+>     }
+>
+>
+> for n in [1024, 16384]:
+>     compute_resource(
+>         n=n,
+>         d=1600,
+>         d_ff=4288,
+>         h=25,
+>         v=50257,
+>         L=48,
+>         save_svg_path=f"figures/transformer_resource_accounting_n{n}.svg",
+>     )
+> ```
+
+{{< gallery cols="2" gap="16px" align="start" >}}
+{{< gallery-item src="figures/transformer_resource_accounting_n1024.svg" alt="Transformer resource accounting with context length 1024" caption="Context length: $n=1024$" >}}
+{{< gallery-item src="figures/transformer_resource_accounting_n16384.svg" alt="Transformer resource accounting with context length 16384" caption="Context length: $n=16384$" >}}
+{{< /gallery >}}
+
 # Solutions
 
 Here are my solutions to the problems given in the writeup.
@@ -556,3 +702,22 @@ Here are my solutions to the problems given in the writeup.
 > > num_heads: 25
 > > d_ff: 4,288 (the nearest multiple of 64 to 8/3x1,600)
 > > ```
+> > Suppose we constructed our model using this configuration. How many trainable parameters would our model have? Assuming each parameter is represented using single-precision floating point, how much memory is required to just load this model?
+> >
+> > **Answer**: TODO
+>
+> > [!question]- Identify the matrix multiplies required to complete a forward pass of our GPT-2 XL-shaped model. How many FLOPs do these matrix multiplies require in total? Assume that our input sequence has `context_length` tokens.
+> >
+> > **Answer**: TODO
+>
+> > [!question]- Based on your analysis above, which parts of the model require the most FLOPs?
+> >
+> > **Answer**: TODO
+>
+> > [!question]- Repeat your analysis with GPT-2 small (12 layers, 768 `d_model`, 12 heads), GPT-2 medium (24 layers, 1024 `d_model`, 16 heads), and GPT-2 large (36 layers, 1280 `d_model`, 20 heads). As the model size increases, which parts of the Transformer LM take up proportionally more or less of the total FLOPs?
+> >
+> > **Answer**: TODO
+>
+> > [!question]- Take GPT-2 XL and increase the context length to 16,384. How does the total FLOPs for one forward pass change? How does the relative contribution of FLOPs of the model components change?
+> >
+> > **Answer**: TODO
