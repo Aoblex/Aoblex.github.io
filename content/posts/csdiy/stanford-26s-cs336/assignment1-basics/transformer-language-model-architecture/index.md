@@ -369,7 +369,7 @@ The embedding layer is just a lookup, so we count it as **0 FLOPs** under this m
 We also ignore RMSNorm, RoPE, softmax, masking, residual additions, and activation functions in the main formula.
 These operations matter in real implementations, but their FLOP counts are usually smaller than the large matrix multiplications below.
 
-{{< collapse summary="Attention" >}}
+{{< collapse summary="Attention: \(8nd^2 + 4n^2d\)" >}}
 
 Let $X \in \mathbb{R}^{n \times d}$ be the input to one Transformer block.
 
@@ -439,7 +439,7 @@ $$
 
 {{< /collapse >}}
 
-{{< collapse summary="FFN" >}}
+{{< collapse summary="FFN: \(6ndd_{\text{ff}}\)" >}}
 
 For SwiGLU, the three matrix multiplications are:
 
@@ -475,7 +475,7 @@ $$
 
 {{< /collapse >}}
 
-{{< collapse summary="LM Head" >}}
+{{< collapse summary="LM Head: \(2ndv\)" >}}
 
 The LM head multiplies:
 
