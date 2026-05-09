@@ -334,8 +334,18 @@ class Transformer(nn.Module):
 
 # Resource Accounting
 
-Here, we do a comprehensive resource accounting for the entire Transformer model, including **compute** and **memory**.
-For now, we ignore the $\text{batch}$ dimension and assume that the input has length $\text{n}$.
+Here, we account for the compute and memory used by a Transformer forward pass.
+Following the official writeup, we focus on **matrix multiplications**, since they dominate the FLOPs in a Transformer.
+
+The core rule is:
+
+$$
+A \in \mathbb{R}^{m \times n},\quad B \in \mathbb{R}^{n \times p}
+\quad\Longrightarrow\quad
+AB \text{ costs } 2mnp \text{ FLOPs}.
+$$
+
+For now, we ignore the $\text{batch}$ dimension and assume that the input sequence has length $n$.
 
 Notation:
 
@@ -355,136 +365,179 @@ Notation:
 
 ## Compute
 
-{{< collapse summary="Transformer" >}}
-
-{{< collapse summary="Embedding Layer" >}}
-This operation consists only of indexing (lookup), so it is dominated by memory access rather than floating-point arithmetic.
-
-Total: **0 FLOPs**.
-{{< /collapse >}}
-
-{{< collapse summary="Transformer Block" >}}
-
-```python
-x = x + self.attn(self.ln1(x), token_positions)
-x = x + self.ffn(self.ln2(x))
-```
+The embedding layer is just a lookup, so we count it as **0 FLOPs** under this matrix-multiply accounting.
+We also ignore RMSNorm, RoPE, softmax, masking, residual additions, and activation functions in the main formula.
+These operations matter in real implementations, but their FLOP counts are usually smaller than the large matrix multiplications below.
 
 {{< collapse summary="Attention" >}}
 
-- $x_{\text{ln1}} = \text{ln1}(x)$:
-    - $A = \sqrt{\frac{1}{d}\sum_i (x_i)^2 + \varepsilon} \approx 2nd$ FLOPs;
-    - ${(x_{\text{ln1}})}_{i} = \frac{x_i g_i}{A} \approx 2nd$ FLOPs;
-    - Total: $4nd$ FLOPs;
-- $x_{\text{attn}} = x + \text{attn}(x_{\text{ln1}}, \text{token\\_positions})$:
-    - $Q/K/V = W_{Q/K/V} x_{\text{ln1}} \approx 3 \times 2nd^2 = 6 nd^2$ FLOPs;
-    - Reshape $Q/K/V: (n, d) \rightarrow (h, n, d^\prime) = 0$ FLOPs;
-    - $Q/K = \text{RoPE}(Q/K, \text{token\\_positions}) \approx h \times 4nd^{\prime} = 4nd$ FLOPs;
-    - $x_{\text{scores}} = QK^T / \sqrt{d'} \approx 2 h n^2 d^{\prime} = 2 n^2 d$ FLOPs;
-    - $x_{\text{weights}} = \text{softmax}(x_{\text{scores}}) \approx 3 h n^2$ FLOPs;
-    - $x_{\text{out}} = (\text{reshape}(x_{\text{weights}} V)) O \approx 2hn^2d^{\prime} + 2nd^2 = 2n^2d + 2nd^2$ FLOPs;
-    - $x_{\text{attn}} = x + x_{\text{out}} \approx nd$ FLOPs;
-    - Total: $(4d+3h)n^2+(9d+8d^2)n$ FLOPs;
+Let $X \in \mathbb{R}^{n \times d}$ be the input to one Transformer block.
+
+The query, key, and value projections are:
+
+$$
+XW_Q,\quad XW_K,\quad XW_V.
+$$
+
+Each one multiplies an $(n \times d)$ matrix by a $(d \times d)$ matrix, so each costs $2nd^2$ FLOPs.
+Together:
+
+$$
+\text{QKV projections} = 3 \cdot 2nd^2 = 6nd^2.
+$$
+
+For attention scores, each head computes:
+
+$$
+Q_iK_i^\top,
+\quad
+Q_i, K_i \in \mathbb{R}^{n \times d^{\prime}}.
+$$
+
+One head costs $2n^2d^{\prime}$ FLOPs.
+Across $h$ heads:
+
+$$
+h \cdot 2n^2d^{\prime} = 2n^2d.
+$$
+
+For the weighted value sum, each head computes:
+
+$$
+A_iV_i,
+\quad
+A_i \in \mathbb{R}^{n \times n},
+\quad
+V_i \in \mathbb{R}^{n \times d^{\prime}}.
+$$
+
+Across all heads, this also costs:
+
+$$
+h \cdot 2n^2d^{\prime} = 2n^2d.
+$$
+
+Finally, the output projection multiplies an $(n \times d)$ matrix by a $(d \times d)$ matrix:
+
+$$
+X_{\text{attn}}W_O,
+$$
+
+which costs:
+
+$$
+2nd^2.
+$$
+
+Therefore, attention costs:
+
+$$
+\text{attention FLOPs}
+= 6nd^2 + 2n^2d + 2n^2d + 2nd^2
+= 8nd^2 + 4n^2d.
+$$
 
 {{< /collapse >}}
 
 {{< collapse summary="FFN" >}}
 
-- $x_{\text{ln2}} = \text{ln2}(x)$:
-    - Total: $4nd$ FLOPs;
-- $x_{\text{ffn}} = x + \text{ffn}(x_{\text{ln2}})$:
-    - $x_{\text{act}} = W_3 x_{\text{ln2}} \approx 2ndd_{\text{ff}}$ FLOPs;
-    - $x_{\text{gates}} = \text{SiLU}(W_1 x_{\text{ln2}}) \approx 2ndd_{\text{ff}} + 4 n d_{\text{ff}}$ FLOPs;
-    - $x_{\text{up}} = x_{\text{act}} \odot x_{\text{gates}} \approx nd_{\text{ff}}$ FLOPs;
-    - $x_{\text{out}} = W_2 x_{\text{up}} \approx 2nd_{\text{ff}}d$ FLOPs;
-    - $x_{\text{ffn}} = x + x_{\text{out}} \approx nd$ FLOPs;
-    - Total: $(6d_{\text{ff}}d + 5d_{\text{ff}} + 5d)n$ FLOPs;
+For SwiGLU, the three matrix multiplications are:
 
-{{< /collapse >}}
+$$
+XW_1,\quad XW_3,\quad X_{\text{up}}W_2,
+$$
 
-{{< /collapse >}}
+where:
 
-{{< collapse summary="Out Norm" >}}
+$$
+W_1, W_3 \in \mathbb{R}^{d \times d_{\text{ff}}},
+\quad
+W_2 \in \mathbb{R}^{d_{\text{ff}} \times d}.
+$$
 
-- $x_{\text{ln\\_final}} = \text{ln\\_final}(x)$
-    - Total: $4nd$ FLOPs;
+The first two projections each cost:
+
+$$
+2ndd_{\text{ff}}.
+$$
+
+The down projection also costs:
+
+$$
+2nd_{\text{ff}}d.
+$$
+
+Therefore, the FFN costs:
+
+$$
+\text{FFN FLOPs} = 6ndd_{\text{ff}}.
+$$
 
 {{< /collapse >}}
 
 {{< collapse summary="LM Head" >}}
-- $x_{\text{lm}} = W_{\text{lm}}(x)$
-    - Total: $2ndv$ FLOPs;
-{{< /collapse >}}
+
+The LM head multiplies:
+
+$$
+XW_{\text{lm}},
+$$
+
+where $X \in \mathbb{R}^{n \times d}$ and $W_{\text{lm}} \in \mathbb{R}^{d \times v}$.
+Therefore:
+
+$$
+\text{LM head FLOPs} = 2ndv.
+$$
 
 {{< /collapse >}}
 
-Summing them gives:
+For one Transformer block:
+
+$$
+\text{block FLOPs} = 8nd^2 + 4n^2d + 6ndd_{\text{ff}}.
+$$
+
+For $L$ layers plus the final LM head:
 
 $$
 \begin{align*}
-\text{FLOPs} = &L\left\{ \left[ (4d+3h)n^2 + (9d+8d^2)n \right] + (6d_{\text{ff}}d+5d_{\text{ff}}+5d)n \right\} \\
-               &+ 4nd + 2ndv
+\text{total FLOPs}
+= L(8nd^2 + 4n^2d + 6ndd_{\text{ff}}) + 2ndv.
 \end{align*}
 $$
 
+This formula makes the dominant terms easier to see:
+
+- Attention has a quadratic sequence-length term: $4n^2d$.
+- Projection and FFN costs scale linearly with sequence length but quadratically, or near-quadratically, with width: $8nd^2$ and $6ndd_{\text{ff}}$.
+- The LM head can be expensive when the vocabulary is large: $2ndv$.
 
 ## Memory
 
-{{< collapse summary="Transformer" >}}
+For memory, we first count **parameter memory**.
+Assume all parameters use `float32`, so each scalar takes $4$ bytes.
 
-{{< collapse summary="Embedding Layer" >}}
+| Component | Parameters | Memory |
+| --- | --- | --- |
+| Token embedding | $vd$ | $4vd$ bytes |
+| Attention projections per layer ($W_Q, W_K, W_V, W_O$) | $4d^2$ | $16d^2$ bytes |
+| SwiGLU FFN per layer ($W_1, W_2, W_3$) | $3dd_{\text{ff}}$ | $12dd_{\text{ff}}$ bytes |
+| RMSNorms per layer | $2d$ | $8d$ bytes |
+| Final RMSNorm | $d$ | $4d$ bytes |
+| LM head | $dv$ | $4dv$ bytes |
 
-- embedding matrix: $\text{Float}[v, d]$;
-- size: $vd \times 4 \text{ bytes} = 4vd \text{ bytes}$;
-
-{{< /collapse >}}
-
-{{< collapse summary="Transformer Block" >}}
-
-- $\text{ln1/2}$: $\text{Float}[d]$;
-- size: $8d \text{ bytes}$;
-
-{{< collapse summary="Attention" >}}
-
-- $W_{Q/K/V/O}$: $\text{Float}[d, d]$;
-- $\text{mask}$: $\text{Bool}[n, n]$;
-- $\text{RoPE}$:
-    - $\cos$: $\text{Float}[n, \frac{d^{\prime}}{2}]$;
-    - $\sin$: $\text{Float}[n, \frac{d^{\prime}}{2}]$;
-- size: $16d^2 + n^2 + 4nd^{\prime} \text{ bytes}$;
-
-{{< /collapse >}}
-
-{{< collapse summary="FFN" >}}
-
-- $W_{1/3}$: $\text{Float}[d_{\text{ff}}, d]$;
-- $W_{2}$: $\text{Float}[d, d_{\text{ff}}]$;
-- size: $12 d d_{\text{ff}} \text{ bytes}$;
-
-{{< /collapse >}}
-
-{{< /collapse >}}
-
-{{< collapse summary="Out Norm" >}}
-
-- $\text{ln\\_final}$: $\text{Float}[d]$;
-- size: $4d \text{ bytes}$;
-
-{{< /collapse >}}
-
-{{< collapse summary="LM Head" >}}
-
-- $W_{\text{lm}}$: $\text{Float}[v, d]$;
-- size: $4dv \text{ bytes}$;
-
-{{< /collapse >}}
-
-{{< /collapse >}}
-
-Summing them gives:
+Therefore, the total parameter memory is:
 
 $$
 \begin{align*}
-\text{size} = 4vd + L(8d+16d^2+n^2+4nd^{\prime}+12dd_{\text{ff}})+4d+4vd \text{ bytes}
+\text{parameter memory}
+= 4vd + L(16d^2 + 12dd_{\text{ff}} + 8d) + 4d + 4dv \text{ bytes}.
 \end{align*}
 $$
+
+If the token embedding and LM head weights are tied, remove one of the $4vd$ terms.
+
+This parameter count does **not** include activation memory, gradients, optimizer states, KV cache, or temporary buffers.
+For example, a materialized causal mask uses $O(n^2)$ memory, and RoPE cosine/sine caches use $O(nd^{\prime})$ memory.
+During training, activations and optimizer states usually dominate the additional memory beyond the parameters.
