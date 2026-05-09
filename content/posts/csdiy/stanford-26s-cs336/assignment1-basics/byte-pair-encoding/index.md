@@ -8,9 +8,9 @@ draft = false
 
 # Introduction
 
-To training an LLM, we will need a tokenizer to tokenize the raw text input to discrete token ids and then map them to embeddings for the model to process.
+To train an LLM, we need a tokenizer that converts raw text into discrete token IDs, which are then mapped to embeddings for the model to process.
 
-However, with different encodings standards, the same text can have different byte representations, which lead to different token representations and therefore different embeddings. For example:
+However, different encoding standards can represent the same text as different byte sequences, which can lead to different tokenizations and therefore different embeddings. For example:
 
 ```pycon
 >>> "你好".encode(encoding="utf-8")
@@ -23,7 +23,7 @@ b'\xff\xfe\x00\x00`O\x00\x00}Y\x00\x00'
 b'\xc4\xe3\xba\xc3'
 ```
 
-So to bridge the gap between raw input (a bulk of text) and the model input (a list of integer token ids), we will need two components: an **encoding standard** and a **tokenizer**.
+To bridge the gap between raw text and model input, we need two components: an **encoding standard** and a **tokenizer**.
 
 In this assignment, we will focus on:
 
@@ -56,9 +56,9 @@ $$
 'U+1F4A9'
 ```
 
-In general, we can consider it as **a giant table that maps each character to a unique integer**, called a _code point_. Current [Unicode 17](https://www.unicode.org/versions/Unicode17.0.0/) has a total of 159,801 characters. In theory, there could be at most 17 * 65,536 = 1,114,112 code points (17 [planes](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-2/#G16433), each with 65,536 code points).
+In general, we can think of it as **a giant table that maps each character to a unique integer**, called a _code point_. As of [Unicode 17](https://www.unicode.org/versions/Unicode17.0.0/), the standard contains 159,801 characters. In theory, there can be at most 17 * 65,536 = 1,114,112 code points (17 [planes](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-2/#G16433), each with 65,536 code points).
 
-It is worth noting that [the internal representation of python string is a list unicode code points with a compact representation](https://stackoverflow.com/questions/1838170/what-is-internal-representation-of-string-in-python-3-x).
+It is worth noting that [the internal representation of a Python string is a compact sequence of Unicode code points](https://stackoverflow.com/questions/1838170/what-is-internal-representation-of-string-in-python-3-x).
 
 ---
 
@@ -68,17 +68,17 @@ $$
 \text{UTF} = \{\text{code point(int)}\} \xrightarrow{\text{encoding}} \{\text{byte sequence(bytes)}\}
 $$
 
-It would be wasteful to encode each character with the corresponding code point, which costs 4 bytes. So we have [UTF](https://unicode.org/faq/utf_bom#:~:text=(SCSU).-,Q%3A%20What%20is%20a%20UTF%3F,-A%20Unicode%20transformation) (Unicode Transformation Format) to save space. It is an algorithmic mapping from every Unicode code point to a unique byte sequence.
+A naive fixed-width representation would require up to 4 bytes per code point. To save space, we have [UTF](https://unicode.org/faq/utf_bom#:~:text=(SCSU).-,Q%3A%20What%20is%20a%20UTF%3F,-A%20Unicode%20transformation) (Unicode Transformation Format), an algorithmic mapping from every Unicode code point to a unique byte sequence.
 
 There are three types of UTF algorithms:
 
-- [UTF-8](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31703): 1 codepoint = $1 \sim 4$ bytes
+- [UTF-8](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31703): 1 code point = $1 \sim 4$ bytes
 
-- [UTF-16](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31699): 1 codepoint = $2 \text{ or } 4$ bytes
+- [UTF-16](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G31699): 1 code point = $2 \text{ or } 4$ bytes
 
-- [UTF-32](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G28875): 1 codepoint = 4 bytes
+- [UTF-32](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G28875): 1 code point = 4 bytes
 
-among which UTF-8 is the most widely used encoding on the web and we will use UTF-8 throughout this assignment.
+Among these, UTF-8 is the most widely used encoding on the web, and we will use UTF-8 throughout this assignment.
 
 ---
 
@@ -92,18 +92,18 @@ among which UTF-8 is the most widely used encoding on the web and we will use UT
   align="center"
 >}}
 
-With UTF-8 encoding, we are essentially taking a sequence of codepoints which are encoded into **a sequence of bytes** ($\in \\{0, 1, \ldots, 255\\}$).
-That's what's fed into the entire modeling pipeline.
+With UTF-8 encoding, we take a sequence of code points and encode it as **a sequence of bytes** ($\in \\{0, 1, \ldots, 255\\}$).
+These bytes are the input to byte-level tokenization; the tokenizer then produces token IDs for the model.
 
-There are several ways to tokenize such kind of input, primarily based on the level of tokenization:
+There are several ways to tokenize this kind of input, primarily based on the level of tokenization:
 
 | Level | Definition | Pros | Cons |
 | --- | --- | --- | --- |
-| [Byte](https://arxiv.org/pdf/2105.13626) | 1 token = 1 byte | No OOV token | Longer seqlen |
-| Word | 1 token = 1 word | Shorter seqlen | Potential OOV token |
-| Subword | 1 byte ≤ 1 token ≤ 1 word | No OOV token and shorter seqlen | More complex training process |
+| [Byte](https://arxiv.org/pdf/2105.13626) | 1 token = 1 byte | No OOV token | Longer sequence length |
+| Word | 1 token = 1 word | Shorter sequence length | Potential OOV token |
+| Subword | 1 byte ≤ 1 token ≤ 1 word | No OOV token and shorter sequence length | More complex training process |
 
-Most LLMs nowadays use **subword tokenization** such as [BPE](https://arxiv.org/abs/1508.07909), because it gives us the best of both worlds in terms of out-of-vocabulary handling and manageable input sequence lengths
+Most LLMs nowadays use **subword tokenization** such as [BPE](https://arxiv.org/abs/1508.07909), because it gives us the best of both worlds in terms of out-of-vocabulary handling and manageable input sequence lengths.
 
 ---
 
@@ -119,11 +119,11 @@ A trained BPE tokenizer encodes texts like this:
 {{< gallery-item src="figures/bpe-tokenids.png" alt="bpe token ids" caption="BPE token IDs" >}}
 {{< /gallery >}}
 
-It consists of 3 essential parts:
+It consists of three essential parts:
 
-- `token2id: dict[Token, int]`: a mapping from **token** to **token id**
+- `token2id: dict[Token, int]`: a mapping from **token** to **token ID**
 
-- `id2token: dict[int, Token]`: a mapping from **token id** to **token**
+- `id2token: dict[int, Token]`: a mapping from **token ID** to **token**
 
 - `merges: list[tuple[Token, Token]]`: a list of merges produced during training ordered by order of creation.
 
@@ -157,16 +157,16 @@ for i in range(256):
 
 ### Pre-tokenization
 
-This pre-tokenization stage could be generally considered as a coarse-grained tokenization over the corpus that helps us count how often pairs of tokens appear.
+This pre-tokenization stage can be considered a coarse-grained tokenization pass over the corpus that helps us count how often pairs of tokens appear.
 
 It has two steps:
 
-1. Split by **special tokens**: we do not want to split special tokens;
+1. Split by **special tokens**: we do not want to merge special tokens with ordinary text.
 
-2. Split by a given [**regular expression**](https://github.com/openai/tiktoken/pull/234/changes): this works better than `.split(' ')`;
+2. Split by a given [**regular expression**](https://github.com/openai/tiktoken/pull/234/changes): this works better than `.split(' ')`.
 
 > [!NOTE]- _word_ and _document_
-> For better consistency and clearness, I introduce the terms:
+> For consistency and clarity, I introduce the following terms:
 > - _document_: the text after splitting by special tokens (_i.e._ after step 1);
 > - _word_: the text after splitting by regular expression (_i.e._ after step 2), it does not necessarily correspond to a word in the linguistic sense.
 
@@ -202,9 +202,9 @@ print(words)
 > [!NOTE]- Why pre-tokenize?
 > It has several advantages:
 >
-> - **Improves training efficiency**: you can count the appearance of a _word_, then count pairs within the _word_ and multiply by the word count, which is much more efficient than looking through the entire corpus for each pair;
+> - **Improves training efficiency**: you can count occurrences of each _word_, then count pairs within each _word_ and multiply by the word count, which is much more efficient than scanning the entire corpus for each pair.
 >
-> - **Avoids different token ids for highly semantically similar tokens** (e.g. `dog!` vs. `dog.`): this is controlled by the **regular expression**. It guarantees that punctuation marks are separated from the words.;
+> - **Prevents merges across coarse regex-defined boundaries**: for example, punctuation marks are separated from words according to the regular expression.
 
 
 ### Merge Iterations
@@ -262,30 +262,30 @@ Then the training loop is like:
 
 ### Code Design
 
-To train BPE efficiently, I will not directly use this corpus structure for update.
-Instead, I use dicts that keep track of the status of pairs and words in the corpus,
-which requires fairly complicated updates.
+To train BPE efficiently, I do not update this simple corpus representation directly.
+Instead, I use dictionaries that track the state of pairs and words in the corpus,
+which makes each merge faster but requires more careful bookkeeping.
 
 To separate the **training iterations** and the **computation details**, I designed two classes:
 
 - [`BPETrainer`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L175): the entry point for training.
-    - It stores training parameters, vocab and merges, _etc._;
+    - It stores training parameters, vocab, merges, _etc._;
     - It has a `train` method that does the [loop](#merge-iterations), but does not worry about the implementation details;
 - [`BPECorpus`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L19): the core of computations.
     - It maintains the related data structures to support fast iterations;
-    - It uses multi-processes for the initial pre-tokenization;
+    - It uses multiprocessing for the initial pre-tokenization;
 
 The core data structures are:
 
 - `pair2count`: stores the count for each pair;
 - `word2count`: stores the count for each word. It never changes during the merge iterations;
-- `pair2words`: stores the words that contain given pair, so that we only need to look up these recorded words instead of all words when merging;
-- `word2tokens`: stores how given word is composed of tokens. We need this to apply merges to words;
-- `pair2count_heap`: a min-heap of (count, pair) with lazy deletion for quick max count pair look up.
+- `pair2words`: stores the words that contain a given pair, so that we only need to look up those recorded words instead of all words when merging;
+- `word2tokens`: stores how a given word is composed of tokens. We need this to apply merges to words;
+- `pair2count_heap`: a priority queue of `(count, pair)` entries with lazy deletion for fast lookup of the most frequent pair.
 
 ### Profiling
 
-I use [`py-spy`](https://github.com/plasma-umass/scalene) to profile.
+I use [`py-spy`](https://github.com/benfred/py-spy) to profile.
 
 ```bash
 uv run py-spy record --subprocesses \
@@ -304,9 +304,9 @@ uv run py-spy record --subprocesses \
     align="center"
 >}}
 
-The left most block contains details about the `train` method([line 290](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L290)), specifically:
-* **initialization**([line 229](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L229)): time consumed in pre-tokenization;
-* **merge iterations**([line 246](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L246)): time consumed in applying pair merge;
+The leftmost block contains details about the `train` method ([line 290](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L290)), specifically:
+* **initialization** ([line 229](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L229)): time consumed by pre-tokenization;
+* **merge iterations** ([line 246](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L246)): time consumed by applying pair merges;
 
 {{< figure
     src="./figures/bpe-profile/train.png"
@@ -338,7 +338,7 @@ The following two blocks are about **multiprocessing**:
     align="center"
 >}}
 
-The remaining 10 blocks (my computer has 10 cores) is about **each chunk pre-tokenization process**:
+The remaining 10 blocks (my computer has 10 cores) correspond to **the pre-tokenization process for each chunk**:
 
 - finditer(44.5%, [line 67](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/utils.py#L67)): `for match in compiled_pattern.finditer(document):`
 - group(9.3%, [line 68](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/utils.py#L68)): `word = match.group(0)`
@@ -353,8 +353,8 @@ The remaining 10 blocks (my computer has 10 cores) is about **each chunk pre-tok
 >}}
 
 > [!note]- On the choice of profiler
-> I tried to use [`scalene`](https://github.com/plasma-umass/scalene) at first, but it seems that it's problematic with multiprocessing.
-> So I switched to [`py-spy`](https://github.com/benfred/py-spy). It's based on sampling and its overhead is very low.
+> I tried to use [`scalene`](https://github.com/plasma-umass/scalene) at first, but it seems to have issues with multiprocessing.
+> So I switched to [`py-spy`](https://github.com/benfred/py-spy). It is based on sampling, and its overhead is very low.
 >
 > **Summary:**
 >
@@ -366,7 +366,7 @@ The remaining 10 blocks (my computer has 10 cores) is about **each chunk pre-tok
 
 ## BPE: Encoding and Decoding
 
-With given _vocabulary_ and _merges_ list, we can now build the tokenizer that does **encoding** and **decoding**.
+Given a _vocabulary_ and a _merges_ list, we can now build the tokenizer that does **encoding** and **decoding**.
 
 In a nutshell, we'll need this tokenizer class:
 
@@ -378,22 +378,22 @@ class BPETokenizer:
 
 ### Encode
 
-BPE Encoding could be considered as a **replay** of the training process:
+BPE encoding can be considered a **replay** of the training process:
 
 1. Split by special tokens (remember to keep them!);
 2. Split by regular expression (must use the same expression as in training);
 3. Tokenize the words we got in step 2:
-    1. A non-special-token word is initially byte-level tokenized. For special tokens, convert to token id directly;
-    2. Find the token pair in current word with **the smallest merge rank**;
-        - merge rank means the index of this pair in merges list;
+    1. A non-special-token word is initially byte-level tokenized. For special tokens, convert directly to the token ID;
+    2. Find the token pair in the current word with **the smallest merge rank**;
+        - merge rank means the index of this pair in the merges list;
         - break if no token pair is in the merges list;
     3. Merge the pair, update the word, then go to previous step.
 
 ### Decode
 
-Decode is easy: token id $\xrightarrow{\text{vocab}}$ token $\xrightarrow{\text{decode by utf-8}}$ string
+Decode is easy: token ID $\xrightarrow{\text{vocab}}$ token $\xrightarrow{\text{decode by UTF-8}}$ string
 
-We use `error="replace"` for malformed bytes.
+We use `errors="replace"` for malformed bytes.
 
 ---
 
@@ -404,14 +404,14 @@ Here are my solutions to the problems given in the writeup.
 > [!note]- Problem(unicode1): Understanding Unicode (1 point)
 > > [!question]- What Unicode character does `chr(0)` return?
 > > **Answer**:
-> > `'\x00'`: this represents byte value $0$ (4 bytes per digit in hexadecimal).
+> > `'\x00'`: the null character, whose Unicode code point is `U+0000`.
 >
 > > [!question]- How does this character’s string representation (`__repr__()`) differ from its printed representation?
 > > **Answer**:
 > > - `print`: shows the character itself, which is invisible for `'\x00'`;
 > > - `__repr__()`: shows the escaped hexadecimal representation.
 > >
-> > We can see it more clearly with the utf-8 encoding representation:
+> > We can see it more clearly with the UTF-8 encoding representation:
 > > ```pycon
 > > >>>print(chr(0))
 > >
@@ -431,8 +431,8 @@ Here are my solutions to the problems given in the writeup.
 > > >>> print("this is a test" + chr(0) + "string")
 > > ```
 > > **Answer**:
-> > When it occurs in text, it is treated as an invisible character and does not affect the printed output.
-> > So `print` won't show any difference. But we can see the difference in the utf-8 encoding representation:
+> > When it occurs in text, it is usually invisible when printed, but it remains part of the string.
+> > So `print` may not show a visible difference, but we can see the difference in the UTF-8 encoding representation:
 > > ```pycon
 > > >>> list(("test" + chr(0) + "string").encode("utf-8"))
 > > [116, 101, 115, 116, 0, 115, 116, 114, 105, 110, 103]
@@ -443,7 +443,7 @@ Here are my solutions to the problems given in the writeup.
 > [!note]- Problem (unicode2):  Unicode Encodings (3 points)
 > > [!question]- What are some reasons to prefer training our tokenizer on $\text{UTF-8}$ encoded bytes, rather than $\text{UTF-16}$ or $\text{UTF-32}$? It may be helpful to compare the output of these encodings for various input strings.
 > > **Answer**:
-> > As mentioned [before](#unicode-transformation-format), $\text{UTF-8}$ is a more efficient algorithm for encoding Unicode characters. Specifically, it matches ASCII encoding for the first 128 characters, which makes it more efficient for English text. I guess that if the primary language of the training data is Chinese, $\text{UTF-16}$ might be more efficient.
+> > As mentioned [before](#unicode-transformation-format), $\text{UTF-8}$ is often more efficient for common web text. Specifically, it matches ASCII encoding for the first 128 characters, which makes it efficient for English text. For mostly Chinese text, $\text{UTF-16}$ can use fewer bytes than $\text{UTF-8}$ for many common characters, but $\text{UTF-8}$ is still usually preferred because of ecosystem support, ASCII compatibility, lack of endianness issues, and simpler byte-level tokenization.
 > > Here's a toy example to show the difference:
 > > ```pycon
 > > >>> text = "To be, or not to be, that is the question."
@@ -470,7 +470,7 @@ Here are my solutions to the problems given in the writeup.
 > > >>> decode_utf8_bytes_to_str_wrong("hello".encode("utf-8"))
 > > 'hello'
 > > ```
-> > **Answer**: This function is incorrect because utf-8 doesn't decode byte by byte. Some bytes do not represent valid characters on their own, but only make sense when combined with other bytes, _e.g._, Chinese characters(奶龙), emojis(💩), _etc._. Here's an example:
+> > **Answer**: This function is incorrect because UTF-8 does not decode byte by byte. Some bytes do not represent valid characters on their own, but only make sense when combined with other bytes, _e.g._, Chinese characters (奶龙), emojis (💩), _etc._. Here's an example:
 > > ```pycon
 > > >>> def decode_utf8_bytes_to_str_wrong(bytestring: bytes):
 > > ...     return "".join([bytes([b]).decode("utf-8") for b in bytestring])
@@ -500,15 +500,15 @@ Here are my solutions to the problems given in the writeup.
 > > ```
 > > I assume that the **decode** means $\text{UTF-8}$ decoding here.
 > > For byte values in $\text{UTF-8}$, we can categorize them into 5 types:
-> > - `0xxxxxxx` (`0x00`–`0x7F`): single-byte character (ASCII)
-> > - `110xxxxx` (`0xC0`–`0xDF`): start of a 2-byte sequence
-> > - `1110xxxx` (`0xE0`–`0xEF`): start of a 3-byte sequence
-> > - `11110xxx` (`0xF0`–`0xF7`): start of a 4-byte sequence
-> > - `10xxxxxx` (`0x80`–`0xBF`): continuation byte (not valid as a starting byte)
+> > - `0xxxxxxx`: single-byte character (ASCII)
+> > - `110xxxxx`: start of a 2-byte sequence
+> > - `1110xxxx`: start of a 3-byte sequence
+> > - `11110xxx`: start of a 4-byte sequence
+> > - `10xxxxxx`: continuation byte (not valid as a starting byte)
 > >
-> > We can consider a **valid** utf-8 character encoding as one of the following forms:
+> > We can consider a **valid** UTF-8 character encoding as one of the following forms:
 > > 1. ASCII sequence;
-> > 2. `start of an n-byte sequence` + `n-1 continuation bytes`.
+> > 2. `start of an n-byte sequence` + `n-1 continuation bytes`, subject to UTF-8's additional range restrictions.
 > >
 > > Any other sequences that **do not follow** these forms are **invalid**, so it's pretty easy to construct one.
 
@@ -526,18 +526,18 @@ Here are my solutions to the problems given in the writeup.
 > > 		--desired_num_chunks 512 \
 > > 		--save_dir "./output/tokenizer/TinyStories"
 > > ```
-> > It would be great if I implement the trainer in C++ in the future. 🥸
+> > A future improvement would be to implement the trainer in C++.
 
 > [!note]- Problem (`train_bpe_tinystories`):  BPE Training on TinyStories (2 points)
 > > [!question]- Train a byte-level BPE tokenizer on the TinyStories dataset, using a maximum vocabulary size of 10,000. Make sure to add the TinyStories `<|endoftext|>` special token to the vocabulary. Serialize the resulting vocabulary and merges to disk for further inspection. How much time and memory did training take? What is the longest token in the vocabulary? Does it make sense?
 > > **Answers**:
-> > - It took about 30 seconds. I didn't track the memory. Probably a few GBs.
+> > - It took about 30 seconds. I didn't track memory usage, but it was probably a few GB.
 > > - The longest token is `b' accomplishment'`, length=15.
 > > - I think it makes sense. It's a valid word.
 >
 > > [!question]- Profile your code. What part of the tokenizer training process takes the most time?
 > > **Answer**:
-> > The most time-consuming part is **pre-tokenization stage** (about **80%** of all time), specifically:
+> > The most time-consuming part is **the pre-tokenization stage** (about **80%** of all time), specifically:
 > > - `finditer` $\approx$ 45.1%;
 > > - `word = match.group(0)` $\approx$ 8.5%;
 > > - `word2count[word] += 1` $\approx$ 23.4%;
@@ -545,7 +545,7 @@ Here are my solutions to the problems given in the writeup.
 > [!note]- Problem (`train_bpe_expts_owt`):  BPE Training on OpenWebText (2 points)
 > > [!question]- Train a byte-level BPE tokenizer on the OpenWebText dataset, using a maximum vocabulary size of 32,000. Serialize the resulting vocabulary and merges to disk for further inspection. What is the longest token in the vocabulary? Does it make sense?
 > > **Answers**:
-> > - The training took about 2min53s(pre-tokenize) + 4min15s(merging) = 7min8s(total).
+> > - The training took about 2min53s (pre-tokenization) + 4min15s (merging) = 7min8s (total).
 > > - The longest token is `b'\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82\xc3\x83\xc3\x82'`, length=64.
 > > - We can use `grep` to check this token:
 > > ```bash
@@ -553,10 +553,10 @@ Here are my solutions to the problems given in the writeup.
 > > sh> grep -a -m 1 ${LONGEST_TOKEN} ./data/owt_train.txt
 > > Subject: How bout the sound Who cares how great the show is if you canÃÂÃÂÃÂÃ ... ÃÂÃÂÃÂÃÂt hear it. Sounds like it was recorded at the bottom of my swimming pool, 1 star. If your a collector then (because it's brent's first show) it might be worth the download. If you want good music, favor yourself and skip it. - January 7, 2005How bout the sound
 > > ```
-> > - I think it makes sense because at least it exists in the data. It just learned some corrupted token from corrupted text.
+> > - I think it makes sense because the sequence exists in the data. The tokenizer learned a corrupted token from corrupted text.
 >
 > > [!question]- Compare and contrast the tokenizer that you get training on TinyStories versus OpenWebText.
-> > **Answers**: I think I need to write a small script to compare the results. I'll do it later.
+> > **Answers**: The TinyStories tokenizer is trained on simpler, cleaner, and more story-like text, so it tends to learn tokens that fit that narrower distribution. The OpenWebText tokenizer is trained on a much broader and noisier web corpus, so it learns a wider range of common web patterns, including some corrupted or unusual byte sequences. This is also reflected in the compression ratios below: the OpenWebText tokenizer compresses OpenWebText better than the TinyStories tokenizer does.
 
 > [!note]- Problem (`tokenizer`):  Implementing the tokenizer (15 points)
 > > [!question]- Deliverable: Implement a `Tokenizer` class that, given a vocabulary and a list of merges, encodes text into integer IDs and decodes integer IDs into text. Your tokenizer should also support user-provided special tokens (appending them to the vocabulary if they aren’t already there).
@@ -577,7 +577,7 @@ Here are my solutions to the problems given in the writeup.
 >
 > > [!question]- What happens if you tokenize your OpenWebText sample with the TinyStories tokenizer? Compare the compression ratio and/or qualitatively describe what happens.
 > > **Answer**:
-> > The compression ratio drops by about **a quarter**(4.3654 bytes/token -> 3.1727 bytes/token).
+> > The compression ratio drops by about **a quarter** (4.3654 bytes/token -> 3.1727 bytes/token).
 > > Here's a comprehensive comparison:
 > >
 > > | Dataset      | Tokenizer    | Speed        | Bytes/Token        |
@@ -590,15 +590,15 @@ Here are my solutions to the problems given in the writeup.
 > > [!question]- Estimate the throughput of your tokenizer (e.g., in bytes/second). How long would it take to tokenize the Pile dataset (825GB of text)?
 > > **Answers**:
 > >
-> > The throughput depends on both the tokenizer and the dataset to be tokenized. Probably because of the document length or text distribution?
-> > Here's their performance
+> > The throughput depends on both the tokenizer and the dataset being tokenized, likely because document length and text distribution affect merge behavior and Python overhead.
+> > Here's their performance:
 > > - On TinyStories data $\approx$ **18 MB/s**;
 > > - On owt data $\approx$ **5.5 MB/s**;
 > >
 > >
-> > Tokenize runtime:
+> > Tokenization runtime:
 > > - TinyStories: 825 GB / 18 MB/s $\approx$ **13** hours;
 > > - owt: 825 GB / 5.5 MB/s $\approx$ **42.6** hours;
 >
 > > [!question]- Using your TinyStories and OpenWebText tokenizers, encode the respective training and development datasets into a sequence of integer token IDs. We’ll use this later to train our language model. We recommend serializing the token IDs as a NumPy array of datatype `uint16`. Why is `uint16` an appropriate choice?
-> > **Answer**: `uint16` is of range $[0, 65535]$. Since our vocabulary is at most $32000$, `uint16` would suffice to represent all token IDs.
+> > **Answer**: `uint16` has range $[0, 65535]$. Since our vocabulary size is at most $32000$, `uint16` is sufficient to represent all token IDs.
