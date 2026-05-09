@@ -8,36 +8,36 @@ draft = false
 
 # Introduction
 
-In [the last section](../byte-pair-encoding/), we worked hard to convert input text into token ids.
-Before using these token ids, we need to build a model that takes these ids as input:
+In [the last section](../byte-pair-encoding/), we converted input text into token IDs.
+Before using these token IDs, we need to build a model that takes them as input:
 $$
-\text{input: (batch, seqlen)} \xrightarrow{\text{model}} \text{output: (batch, seqlen, vocab)}
+\text{input: (batch, sequence length)} \xrightarrow{\text{model}} \text{output: (batch, sequence length, vocab)}
 $$
 
 Formally, the input and output spaces can be described as:
 
 $$
-\text{input} \in \mathbb{N}^{\text{batch} \times \text{seqlen}}, \quad
-\text{output} \in \mathbb{R}^{\text{batch} \times \text{seqlen} \times \text{vocab}}
+\text{input} \in \mathbb{N}^{\text{batch} \times \text{sequence length}}, \quad
+\text{output} \in \mathbb{R}^{\text{batch} \times \text{sequence length} \times \text{vocab}}
 $$
 
-In this part of the assignment, we focus on the **Transformer architecture** and we will build one from scratch!
+In this part of the assignment, we focus on the **Transformer architecture** and build one from scratch!
 
 ---
 
 # Transformer LM
 
-The structure of a modern transformer LM is given in the first figure below, and the internal structure of a transformer block is shown in the second figure.
+The first figure below shows the structure of a modern Transformer LM, and the second figure shows the internal structure of a Transformer block.
 
 {{< gallery cols="2" gap="16px" align="center" >}}
-{{< gallery-item src="figures/transformer-overview.png" alt="An overview of transformer model" caption="An overview of transformer model" >}}
-{{< gallery-item src="figures/transformer-block.png" alt="The structure of a transformer block" caption="The structure of a transformer block" >}}
+{{< gallery-item src="figures/transformer-overview.png" alt="An overview of a Transformer model" caption="An overview of a Transformer model" >}}
+{{< gallery-item src="figures/transformer-block.png" alt="The structure of a Transformer block" caption="The structure of a Transformer block" >}}
 {{< /gallery >}}
 
-Next we will look into the details of each component and implement them from scratch.
+Next, we will look at each component in detail and implement it from scratch.
 
 > [!NOTE] Parameter Initialization
-> Since this assignment is already long, the course staff will save the details of parameter initialization for assignment 3. Here they specified such initialization configuration:
+> Since this assignment is already long, the course staff defers the details of parameter initialization to assignment 3. For this assignment, they specify the following initialization configuration:
 >
 > - Linear weights:
 >   $\mathcal{N}\left(\mu = 0, \sigma^2 = \frac{2}{d_{in} + d_{out}}\right)$ truncated at $[-3\sigma, 3\sigma]$
@@ -105,7 +105,7 @@ $$
 \end{align*}
 $$
 
-where $a \in \mathbb{R}^{d_{model}}$ is the input activations, and $g \in \mathbb{R}^{d_{model}}$ is a vector of learnable "gain" parameters.
+where $a \in \mathbb{R}^{d_{model}}$ is the input activation vector, and $g \in \mathbb{R}^{d_{model}}$ is a vector of learnable "gain" parameters.
 
 The forward function:
 
@@ -121,7 +121,7 @@ class RMSNorm(nn.Module):
 
 ## SwiGLU: Sigmoid Linear Unit + Gated Linear Unit
 
-We will implement the position-wise feed-forward network in a transformer block with a [**SwiGLU**](https://github.com/huggingface/transformers/blob/c6c7e189846ccaa3bb410569bfc6556d193c638d/src/transformers/models/qwen3/modeling_qwen3.py#L70) activation function, which combines a [SiLU](https://arxiv.org/pdf/1702.03118) and a [GLU](https://arxiv.org/abs/2002.05202):
+We will implement the position-wise feed-forward network in a Transformer block with a [**SwiGLU**](https://github.com/huggingface/transformers/blob/c6c7e189846ccaa3bb410569bfc6556d193c638d/src/transformers/models/qwen3/modeling_qwen3.py#L70) activation function, which combines [SiLU](https://arxiv.org/pdf/1702.03118) and [GLU](https://arxiv.org/abs/2002.05202):
 
 $$
 \text{FFN}(x) = \text{SwiGLU}(x, W_1, W_2, W_3) = \underbrace{W_2}_{\text{down proj}} (\underbrace{\text{SiLU}(W_1 x)}_{\text{gate proj}} \odot \underbrace{W_3 x}_{\text{up proj}})
@@ -135,36 +135,36 @@ and canonically, $d_{\text{ff}} = \frac{8}{3} d_{\text{model}}$.
 
 Some heuristic arguments from the writeup:
 
-- GLUs are suggested to "reduce the vanishing gradient problem for deep architectures by providing **a linear path** for the gradients while retaining non-linear capabilities". To be specific:
+- GLUs are suggested to "reduce the vanishing gradient problem for deep architectures by providing **a linear path** for the gradients while retaining non-linear capabilities." To be specific:
 
     $$
-    g := \sigma(W_1x), v := W_2x \\
+    g := \sigma(W_gx), v := W_vx \\
     y=g\odot v
     $$
 
     Then:
 
     $$
-    \frac{\partial y}{\partial x}= \frac{\partial y}{\partial g} \frac{\partial g}{\partial x} + \frac{\partial y}{\partial v} \frac{\partial v}{\partial x} = \underbrace{\operatorname{diag}(v) \sigma^\prime(W_1 x)}_{g \text{ channel}} + \underbrace{\operatorname{diag}(g) W_2}_{v \text{ channel}}
+    \frac{\partial y}{\partial x}= \frac{\partial y}{\partial g} \frac{\partial g}{\partial x} + \frac{\partial y}{\partial v} \frac{\partial v}{\partial x} = \underbrace{\operatorname{diag}(v) \sigma^\prime(W_g x) W_g}_{g \text{ channel}} + \underbrace{\operatorname{diag}(g) W_v}_{v \text{ channel}}
     $$
 
-    In which $\sigma^\prime (W_1 x) = \sigma (W_1 x) \odot (1 - \sigma(W_1 x)) \le 0.25$ elementwisely when $\sigma(x) = \frac{1}{1 + e^{-x}}$. So the $v$ channel provides a linear path for gradients.
+    Here, $\sigma^\prime (W_g x) = \sigma (W_g x) \odot (1 - \sigma(W_g x)) \le 0.25$ elementwise when $\sigma(x) = \frac{1}{1 + e^{-x}}$. Therefore, the $v$ channel provides a linear path for gradients.
 
 - It is fine to round the dimensions to a nearby multiple of 64 for hardware efficiency.
 
-- Keep an empirical perspective.
+- Keep an empirical perspective: the exact dimension choice is ultimately an implementation and performance tradeoff.
 
 ```python
 class SwiGLU(nn.Module):
     def forward(
         self,
         x: Float[torch.Tensor, "... d_model"],
-    ) -> Float[torch.Tensor, "... d_model"]:
+    ) -> Float[torch.Tensor, "... d_model"]: ...
 ```
 
 ---
 
-## RoPE: Relative Positional Embeddings
+## RoPE: Rotary Positional Embeddings
 
 The idea behind [RoPE](https://kexue.fm/archives/8265) is to **implement relative positional encoding via absolute positional encoding.**
 
@@ -174,7 +174,7 @@ $$
 \tilde{q}_m = f(q, m), \tilde{k}_n = f(k, n)
 $$
 
-Then the absolution position information is injected into $\tilde{q}_m$ and $\tilde{k}_n$. But we hope that we can get the **relative** position information after the inner product in attention layer:
+Then absolute position information is injected into $\tilde{q}_m$ and $\tilde{k}_n$. However, we want the inner product in the attention layer to depend on **relative** position information:
 
 $$
 \langle \tilde{q}_m, \tilde{k}_n \rangle = \langle f(q, m), f(k, n) \rangle = g(q, k, m - n)
@@ -218,7 +218,7 @@ q_{d-1}
 \end{pmatrix}
 $$
 
-Then the relative position information is encoded in attention weights:
+Then relative position information is encoded in the attention weights:
 
 $$
 (\mathcal{R}_m q)^\top (\mathcal{R}_n k)
@@ -253,7 +253,7 @@ class ScaledDotProductAttention(nn.Module):
         self,
         Q: Float[torch.Tensor, "... queries d_k"],
         K: Float[torch.Tensor, "... keys d_k"],
-        V: Float[torch.Tensor, "... queries d_v"],
+        V: Float[torch.Tensor, "... keys d_v"],
         mask: Bool[torch.Tensor, "... queries keys"] | None = None,
     ) -> Float[torch.Tensor, "... queries d_v"]: ...
 ```
@@ -269,7 +269,7 @@ $$
 \text{for } \text{head}_i = \text{Attention}(Q_i, K_i, V_i)
 $$
 
-And multi-head self-attention is defined as:
+Multi-head self-attention is then defined as:
 
 $$
 \text{MultiHeadSelfAttention}(x) = W_O \text{MultiHeadAttention}(W_Qx, W_Kx, W_Vx) \\
@@ -277,9 +277,9 @@ $$
 
 Some implementation details:
 
-- Causal: add a lower triangle matrix `mask` to prevent current query from attending future tokens. (1: attend, 0: ignore)
+- Causal: apply a lower triangular `mask` to prevent the current query from attending to future tokens. (1: attend, 0: ignore)
 
-- RoPE: add positional information to **queries** and **keys** with RoPE. Each head is applied independently. **Do not** apply RoPE to value vectors.
+- RoPE: add positional information to **queries** and **keys** with RoPE. Each head is processed independently. **Do not** apply RoPE to value vectors.
 
 ```python
 class MultiheadSelfAttentionWithRoPE(nn.Module):
@@ -294,7 +294,7 @@ class MultiheadSelfAttentionWithRoPE(nn.Module):
 
 ## Transformer Block
 
-The structure of a transformer block is shown [here](#transformer-lm).
+The structure of a Transformer block is shown [here](#transformer-lm).
 
 ```python
 class TransformerBlock(nn.Module):
@@ -313,7 +313,7 @@ class TransformerBlock(nn.Module):
 
 ## Transformer LM
 
-Put all these components together and we can get the full transformer model:
+Putting all these components together gives us the full Transformer model:
 
 ```python
 class Transformer(nn.Module):
@@ -334,20 +334,22 @@ class Transformer(nn.Module):
 
 # Resource Accounting
 
-Here we do a comprehensive resource accounting for the entire transformer model, including **compute** and **memory**.
-For now we ignore the $\text{batch}$ dimension and assume that the input is of length $\text{n}$.
+Here, we do a comprehensive resource accounting for the entire Transformer model, including **compute** and **memory**.
+For now, we ignore the $\text{batch}$ dimension and assume that the input has length $\text{n}$.
 
-Notations:
+Notation:
 
 - $n$: input sequence length;
 
 - $d$: dimension of the model;
 
-- $d_{\text{ff}}$: dimension in FFN up projection;
+- $d_{\text{ff}}$: dimension of the FFN up projection;
 
 - $h$: number of attention heads;
 
-- $v$: size of vocabulary;
+- $d^{\prime} = d / h$: dimension per attention head;
+
+- $v$: vocabulary size;
 
 - $L$: number of layers;
 
@@ -356,9 +358,9 @@ Notations:
 {{< collapse summary="Transformer" >}}
 
 {{< collapse summary="Embedding Layer" >}}
-This operation consists only of indexing (lookup) and is dominated by memory access rather than floating-point arithmetic.
+This operation consists only of indexing (lookup), so it is dominated by memory access rather than floating-point arithmetic.
 
-total: **0 FLOPS**.
+Total: **0 FLOPs**.
 {{< /collapse >}}
 
 {{< collapse summary="Transformer Block" >}}
@@ -380,9 +382,9 @@ x = x + self.ffn(self.ln2(x))
     - $Q/K = \text{RoPE}(Q/K, \text{token\\_positions}) \approx h \times 4nd^{\prime} = 4nd$ FLOPs;
     - $x_{\text{scores}} = QK^T / \sqrt{d'} \approx 2 h n^2 d^{\prime} = 2 n^2 d$ FLOPs;
     - $x_{\text{weights}} = \text{softmax}(x_{\text{scores}}) \approx 3 h n^2$ FLOPs;
-    - $x_{\text{out}}= (\text{reshape}(x_{\text{weights}} V)) O \approx 2hn^2d^{\prime} + 2nd^2 = 2n^2d + 2nd^2$ FLOPs;
+    - $x_{\text{out}} = (\text{reshape}(x_{\text{weights}} V)) O \approx 2hn^2d^{\prime} + 2nd^2 = 2n^2d + 2nd^2$ FLOPs;
     - $x_{\text{attn}} = x + x_{\text{out}} \approx nd$ FLOPs;
-    - Total: $(4d+3h)n^2+(5d+8d^2)n$ FLOPs;
+    - Total: $(4d+3h)n^2+(9d+8d^2)n$ FLOPs;
 
 {{< /collapse >}}
 
@@ -390,13 +392,13 @@ x = x + self.ffn(self.ln2(x))
 
 - $x_{\text{ln2}} = \text{ln2}(x)$:
     - Total: $4nd$ FLOPs;
-- $x_{\text{ffn}} = x + \text{ffn}(x_{\text{ln2}})$
+- $x_{\text{ffn}} = x + \text{ffn}(x_{\text{ln2}})$:
     - $x_{\text{act}} = W_3 x_{\text{ln2}} \approx 2ndd_{\text{ff}}$ FLOPs;
     - $x_{\text{gates}} = \text{SiLU}(W_1 x_{\text{ln2}}) \approx 2ndd_{\text{ff}} + 4 n d_{\text{ff}}$ FLOPs;
-    - $x_{\text{up}} = x_{\text{act}} \odot x_{\text{gates}} \approx nd_{\text{ff}}^2$ FLOPs;
+    - $x_{\text{up}} = x_{\text{act}} \odot x_{\text{gates}} \approx nd_{\text{ff}}$ FLOPs;
     - $x_{\text{out}} = W_2 x_{\text{up}} \approx 2nd_{\text{ff}}d$ FLOPs;
     - $x_{\text{ffn}} = x + x_{\text{out}} \approx nd$ FLOPs;
-    - Total: $(d_{\text{ff}}^2 + 6d_{\text{ff}}d + 4 d_{\text{ff}} + d) n$ FLOPs;
+    - Total: $(6d_{\text{ff}}d + 5d_{\text{ff}} + 5d)n$ FLOPs;
 
 {{< /collapse >}}
 
@@ -416,11 +418,11 @@ x = x + self.ffn(self.ln2(x))
 
 {{< /collapse >}}
 
-Sum them up:
+Summing them gives:
 
 $$
 \begin{align*}
-\text{FLOPS} = &L\left\{ \left[ (4d+3h)n^2 + (9d+8d^2)n \right] + (d_{\text{ff}}^2+6d_{\text{ff}}d+4d_{\text{ff}}+5d)n \right\} \\
+\text{FLOPs} = &L\left\{ \left[ (4d+3h)n^2 + (9d+8d^2)n \right] + (6d_{\text{ff}}d+5d_{\text{ff}}+5d)n \right\} \\
                &+ 4nd + 2ndv
 \end{align*}
 $$
@@ -440,7 +442,7 @@ $$
 {{< collapse summary="Transformer Block" >}}
 
 - $\text{ln1/2}$: $\text{Float}[d]$;
-- size: $8d \text{ bytes}$
+- size: $8d \text{ bytes}$;
 
 {{< collapse summary="Attention" >}}
 
@@ -449,7 +451,7 @@ $$
 - $\text{RoPE}$:
     - $\cos$: $\text{Float}[n, \frac{d^{\prime}}{2}]$;
     - $\sin$: $\text{Float}[n, \frac{d^{\prime}}{2}]$;
-- size: $16d^2 + \frac{n^2}{32} + 4nd^{\prime} \text{ bytes}$
+- size: $16d^2 + n^2 + 4nd^{\prime} \text{ bytes}$;
 
 {{< /collapse >}}
 
@@ -473,16 +475,16 @@ $$
 {{< collapse summary="LM Head" >}}
 
 - $W_{\text{lm}}$: $\text{Float}[v, d]$;
-- size: $4dv \text{ byte}$;
+- size: $4dv \text{ bytes}$;
 
 {{< /collapse >}}
 
 {{< /collapse >}}
 
-Sum them up:
+Summing them gives:
 
 $$
 \begin{align*}
-\text{size} = 4vd + L(8d+16d^2+\frac{n^2}{32}+4nd^{\prime}+12dd_{\text{ff}})+4d+4vd \text{ bytes}
+\text{size} = 4vd + L(8d+16d^2+n^2+4nd^{\prime}+12dd_{\text{ff}})+4d+4vd \text{ bytes}
 \end{align*}
 $$
