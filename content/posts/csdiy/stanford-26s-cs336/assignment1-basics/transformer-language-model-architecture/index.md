@@ -704,20 +704,84 @@ Here are my solutions to the problems given in the writeup.
 > > ```
 > > Suppose we constructed our model using this configuration. How many trainable parameters would our model have? Assuming each parameter is represented using single-precision floating point, how much memory is required to just load this model?
 > >
-> > **Answer**: TODO
+> > **Answer**: Under the assignment architecture, assuming the token embedding and LM head are **not** tied, the parameter count is:
+> >
+> > | Component | Parameters |
+> > | --- | ---: |
+> > | Token embedding | $vd = 50{,}257 \times 1{,}600 = 80{,}411{,}200$ |
+> > | Attention projections | $L \cdot 4d^2 = 48 \cdot 4 \cdot 1{,}600^2 = 491{,}520{,}000$ |
+> > | SwiGLU FFN | $L \cdot 3dd_{\text{ff}} = 48 \cdot 3 \cdot 1{,}600 \cdot 4{,}288 = 987{,}955{,}200$ |
+> > | RMSNorm | $L \cdot 2d + d = 155{,}200$ |
+> > | LM head | $dv = 1{,}600 \times 50{,}257 = 80{,}411{,}200$ |
+> > | **Total** | **$1{,}640{,}452{,}800$** |
+> >
+> > So the model has about **1.64B trainable parameters**.
+> > With single-precision floating point, each parameter takes $4$ bytes, so loading just the parameters requires $1{,}640{,}452{,}800 \times 4 = 6{,}561{,}811{,}200$ bytes, or about **6.11 GiB**.
+> >
+> > If the token embedding and LM head are tied, remove one $vd$ term; the total becomes $1{,}560{,}041{,}600$ parameters, or about $5.81$ GiB in float32.
 >
 > > [!question]- Identify the matrix multiplies required to complete a forward pass of our GPT-2 XL-shaped model. How many FLOPs do these matrix multiplies require in total? Assume that our input sequence has `context_length` tokens.
 > >
-> > **Answer**: TODO
+> > **Answer**: The matrix multiplies are:
+> >
+> > 1. Attention projections: $Q, K, V, O$, costing $8nd^2$ FLOPs per layer.
+> > 2. Attention scores: $QK^\top$, costing $2n^2d$ FLOPs per layer.
+> > 3. Attention weighted value sum: $AV$, costing $2n^2d$ FLOPs per layer.
+> > 4. SwiGLU FFN: gate, up, and down projections, costing $6ndd_{\text{ff}}$ FLOPs per layer.
+> > 5. LM head: final vocabulary projection, costing $2ndv$ FLOPs once.
+> >
+> > For GPT-2 XL-shaped configuration with $n=1024$, $d=1600$, $d_{\text{ff}}=4288$, $v=50257$, and $L=48$:
+> >
+> > | Component | FLOPs | Share |
+> > | --- | ---: | ---: |
+> > | Attention projections | $1.0066 \times 10^{12}$ | 28.62% |
+> > | Attention scores | $1.6106 \times 10^{11}$ | 4.58% |
+> > | Attention value mix | $1.6106 \times 10^{11}$ | 4.58% |
+> > | SwiGLU FFN | $2.0233 \times 10^{12}$ | 57.53% |
+> > | LM head | $1.6468 \times 10^{11}$ | 4.68% |
+> > | **Total** | **$3.5168 \times 10^{12}$** | **100.00%** |
+> >
+> > So one forward pass costs about **3.52T FLOPs** for a single sequence of length $1024$.
 >
 > > [!question]- Based on your analysis above, which parts of the model require the most FLOPs?
 > >
-> > **Answer**: TODO
+> > **Answer**: At context length $1024$, the dominant cost is the **SwiGLU FFN**, which accounts for about **57.53%** of the forward-pass FLOPs.
+> > The next largest cost is the attention projection matrices, about **28.62%**.
+> >
+> > The explicitly quadratic attention terms, $QK^\top$ and $AV$, are only about **9.16%** together at $n=1024$.
+> > This is because $n$ is still smaller than $d$ here, and the projection/FFN terms scale strongly with model width.
 >
 > > [!question]- Repeat your analysis with GPT-2 small (12 layers, 768 `d_model`, 12 heads), GPT-2 medium (24 layers, 1024 `d_model`, 16 heads), and GPT-2 large (36 layers, 1280 `d_model`, 20 heads). As the model size increases, which parts of the Transformer LM take up proportionally more or less of the total FLOPs?
 > >
-> > **Answer**: TODO
+> > **Answer**: I use the same assignment convention $d_{\text{ff}} \approx \frac{8}{3}d$, rounded to a nearby multiple of $64$:
+> > small uses $d_{\text{ff}}=2048$, medium uses $d_{\text{ff}}=2752$, and large uses $d_{\text{ff}}=3456$.
+> >
+> > | Model | Total FLOPs | Attention projections | Attention scores | Attention value mix | FFN | LM head |
+> > | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+> > | Small | $2.9165 \times 10^{11}$ | 19.88% | 6.63% | 6.63% | 39.76% | 27.10% |
+> > | Medium | $8.3017 \times 10^{11}$ | 24.83% | 6.21% | 6.21% | 50.05% | 12.70% |
+> > | Large | $1.7867 \times 10^{12}$ | 27.04% | 5.41% | 5.41% | 54.76% | 7.37% |
+> > | XL | $3.5168 \times 10^{12}$ | 28.62% | 4.58% | 4.58% | 57.53% | 4.68% |
+> >
+> > As the model gets wider and deeper while the context length stays fixed at $1024$, the **FFN and attention projection terms take up more of the total FLOPs**.
+> > The **LM head becomes proportionally smaller**, because it scales like $O(ndv)$ while the per-layer projection and FFN costs scale like $O(Lnd^2)$ and $O(Lndd_{\text{ff}})$.
+> > The quadratic sequence terms also become proportionally smaller because $n$ is fixed while $d$ and $L$ increase.
 >
 > > [!question]- Take GPT-2 XL and increase the context length to 16,384. How does the total FLOPs for one forward pass change? How does the relative contribution of FLOPs of the model components change?
 > >
-> > **Answer**: TODO
+> > **Answer**: With the same GPT-2 XL-shaped model but $n=16{,}384$, the total forward-pass FLOPs become $1.3358 \times 10^{14}$ FLOPs, or about **133.58T FLOPs**.
+> > This is about **38.0x** larger than the $n=1024$ case.
+> >
+> > | Component | FLOPs | Share |
+> > | --- | ---: | ---: |
+> > | Attention projections | $1.6106 \times 10^{13}$ | 12.06% |
+> > | Attention scores | $4.1232 \times 10^{13}$ | 30.87% |
+> > | Attention value mix | $4.1232 \times 10^{13}$ | 30.87% |
+> > | SwiGLU FFN | $3.2373 \times 10^{13}$ | 24.24% |
+> > | LM head | $2.6349 \times 10^{12}$ | 1.97% |
+> > | **Total** | **$1.3358 \times 10^{14}$** | **100.00%** |
+> >
+> > The main change is that the quadratic attention terms dominate.
+> > At $n=1024$, $QK^\top$ and $AV$ together were only about **9.16%** of the FLOPs.
+> > At $n=16{,}384$, they become about **61.74%** of the FLOPs.
+> > This is exactly the expected effect of the $4n^2d$ term in attention.
