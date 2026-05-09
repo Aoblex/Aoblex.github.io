@@ -1,0 +1,4 @@
+.md-content .admonition-content pre code {
+    color: inherit !important;
+    background-color: transparent !important;
+}
