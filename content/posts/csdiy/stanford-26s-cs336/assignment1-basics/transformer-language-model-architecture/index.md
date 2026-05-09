@@ -541,3 +541,18 @@ If the token embedding and LM head weights are tied, remove one of the $4vd$ ter
 This parameter count does **not** include activation memory, gradients, optimizer states, KV cache, or temporary buffers.
 For example, a materialized causal mask uses $O(n^2)$ memory, and RoPE cosine/sine caches use $O(nd^{\prime})$ memory.
 During training, activations and optimizer states usually dominate the additional memory beyond the parameters.
+
+# Solutions
+
+Here are my solutions to the problems given in the writeup.
+
+> [!note]- Problem (transformer_accounting): Transformer LM resource accounting (5 points)
+> > [!question]- Consider a GPT-2 XL-sized model using our assignment architecture, which has the following configuration:
+> > ```txt
+> > vocab_size: 50,257
+> > context_length: 1,024
+> > num_layers: 48
+> > d_model: 1,600
+> > num_heads: 25
+> > d_ff: 4,288 (the nearest multiple of 64 to 8/3x1,600)
+> > ```
