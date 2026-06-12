@@ -29,17 +29,26 @@ ShowCodeCopyButtons = true
 ShowShareButtons = false
 ShowToc = true
 
-[params.homeInfoParams]
-Title = "trytry's home"
-Content = "Hi there!"
+[params.profileMode]
+enabled = true
+title = "trytry's home"
+subtitle = "Hi there!"
+imageUrl = "images/profile.jpg"
+imageTitle = "Chenrui Wang"
+imageWidth = 150
+imageHeight = 150
 
-[[params.socialIcons]]
-name = "github"
-url = "https://github.com/Aoblex"
+[[params.profileMode.buttons]]
+name = "Posts"
+url = "/posts"
 
-[[params.socialIcons]]
-name = "email"
-url = "iamwangchenrui@gmail.com"
+[[params.profileMode.buttons]]
+name = "Archives"
+url = "/archives"
+
+[[params.profileMode.buttons]]
+name = "Search"
+url = "/search"
 
 [menus]
 # Hugo menus: https://gohugo.io/configuration/menus/
