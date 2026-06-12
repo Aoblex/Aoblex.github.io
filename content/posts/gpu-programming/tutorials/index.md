@@ -1,11 +1,9 @@
 +++
-title = 'Must-Reads'
+title = 'Tutorials'
 date = '2026-04-30T13:47:58+08:00'
-summary = 'A collection of links that I find helpful when learning GPU programming.'
+summary = 'A collection of helpful GPU programming tutorials. 📖'
 weight = 10
 +++
-
-# NVIDIA Official Documentations
 
 - [CUDA Programming Guide](https://docs.nvidia.com/cuda/cuda-programming-guide/): this is the very first document that I read when I started learning CUDA from scratch. I think the most important thing is to get a big picture of [**the CUDA programming model**](https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html#programming-model).
 
@@ -29,9 +27,6 @@ weight = 10
     align="center"
 >}}
 
-
-# Useful Materials
-
 - [GPU glossary](https://modal.com/gpu-glossary): this glossary **connects the dots**. It really helped me a lot in understanding all kinds of GPU related terminologies.
 
 {{< figure
@@ -42,5 +37,3 @@ weight = 10
     width="400"
     align="center"
 >}}
-
-# Hands-on Practice Projects
