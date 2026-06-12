@@ -12,7 +12,7 @@ After building the tokenizer and the model, the remaining task is to build the c
 - **Optimizer**: define the update rule used to minimize this loss, such as AdamW.
 - **Training loop**: build the infrastructure that loads data, saves checkpoints, and manages training.
 
-# Cross-entropy Loss
+# Loss: Cross-entropy Loss
 
 Recall that the Transformer model estimates **the distribution** of the next token given a context. Its final layer outputs a matrix $o \in \mathbb{R}^{n \times \text{vocab}}$, where the $i$-th row $o_i \in \mathbb{R}^{\text{vocab}}$ contains the next-token logits for the $i$-th input position.
 
@@ -44,3 +44,12 @@ $$
 > Therefore, minimizing $\ell$ is equivalent to minimizing $D_{\text{KL}}$, since $H(p)$ is fixed with respect to the model parameters. In other words, the model is trying to learn a distribution that matches the data distribution as closely as possible.
 >
 > In information-theoretic terms, minimizing cross-entropy also corresponds to learning a probability model that gives a shorter expected code length for data from the true distribution.
+
+> [!note] Perplexity
+> For a sequence of length $m$, the perplexity is defined as:
+> $$
+\text{perplexity} = \exp \left\{ \frac{1}{m} \sum_{i=1}^{m} \ell_i \right\}
+$$
+>
+
+# Optimizer: AdamW
