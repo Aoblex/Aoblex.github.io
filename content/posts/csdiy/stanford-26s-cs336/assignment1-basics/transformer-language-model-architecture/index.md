@@ -8,20 +8,17 @@ draft = false
 
 # Introduction
 
-In [the last section](../byte-pair-encoding/), we converted input text into token IDs.
-Before using these token IDs, we need to build a model that takes them as input:
-$$
-\text{input: (batch, sequence length)} \xrightarrow{\text{model}} \text{output: (batch, sequence length, vocab)}
-$$
-
-Formally, the input and output spaces can be described as:
+In [the last section](../byte-pair-encoding/), we built a BPE tokenizer from scratch, so we can convert raw texts into token IDs that a language model can understand.
 
 $$
-\text{input} \in \mathbb{N}^{\text{batch} \times \text{sequence length}}, \quad
-\text{output} \in \mathbb{R}^{\text{batch} \times \text{sequence length} \times \text{vocab}}
+\text{text: (batch,)} \xrightarrow{\text{BPE}} \text{input: (batch, seqlen)}
 $$
 
-In this part of the assignment, we focus on the **Transformer architecture** and build one from scratch!
+In this section, we focus on building a **Transformer language model** to get output:
+
+$$
+\text{input: (batch, seqlen)} \xrightarrow{\text{model}} \text{output: (batch, seqlen, vocab)}
+$$
 
 ---
 
@@ -82,7 +79,7 @@ $$
 y = \text{Embeddings[}x\text{]}
 $$
 
-The forward function:
+It's actually an indexing operation. The forward function:
 
 ```python
 class Embedding(nn.Module):
@@ -107,6 +104,16 @@ $$
 
 where $a \in \mathbb{R}^{d_{model}}$ is the input activation vector, and $g \in \mathbb{R}^{d_{model}}$ is a vector of learnable "gain" parameters.
 
+{{< figure
+  src="figures/operator-proportions.png"
+  alt="Proportions for operator classes in PyTorch"
+  caption="Operator-class proportions reported in [Data Movement Is All You Need](https://arxiv.org/pdf/2007.00072)."
+  width="60%"
+  align="center"
+>}}
+
+One practical motivation for RMSNorm is that normalization is often much more expensive than its FLOP count suggests. In the table above, statistical normalization accounts for only $0.17\%$ of FLOPs, but takes $25.5\%$ of the PyTorch runtime. These operators are dominated by reductions and data movement, not arithmetic. RMSNorm removes the mean-centering step from LayerNorm, so it is simpler to compute and usually faster in practice. This is why modern LLM implementations commonly replace LayerNorm with RMSNorm: it can bring a noticeable speedup while leaving model quality almost unchanged.
+
 The forward function:
 
 ```python
@@ -124,7 +131,7 @@ class RMSNorm(nn.Module):
 We will implement the position-wise feed-forward network in a Transformer block with a [**SwiGLU**](https://github.com/huggingface/transformers/blob/c6c7e189846ccaa3bb410569bfc6556d193c638d/src/transformers/models/qwen3/modeling_qwen3.py#L70) activation function, which combines [SiLU](https://arxiv.org/pdf/1702.03118) and [GLU](https://arxiv.org/abs/2002.05202):
 
 $$
-\text{FFN}(x) = \text{SwiGLU}(x, W_1, W_2, W_3) = \underbrace{W_2}_{\text{down proj}} (\underbrace{\text{SiLU}(W_1 x)}_{\text{gate proj}} \odot \underbrace{W_3 x}_{\text{up proj}})
+\text{FFN}(x) = \text{SwiGLU}(x, W_1, W_2, W_3) = \underbrace{W_2}_{\text{down proj}} (\underbrace{\text{SiLU}(W_1 x)}_{\text{gate branch}} \odot \underbrace{W_3 x}_{\text{value branch}})
 $$
 
 where $x \in \mathbb{R}^{d_{\text{model}}}$,
@@ -138,21 +145,32 @@ Some heuristic arguments from the writeup:
 - GLUs are suggested to "reduce the vanishing gradient problem for deep architectures by providing **a linear path** for the gradients while retaining non-linear capabilities." To be specific:
 
     $$
-    g := \sigma(W_gx), v := W_vx \\
-    y=g\odot v
+    g_i = \sigma\left(\sum_j W_{g,ij}x_j\right), \quad
+    v_i = \sum_j W_{v,ij}x_j, \quad
+    y_i = g_i v_i
     $$
 
-    Then:
+    For one input coordinate $x_k$, the scalar derivative is:
 
     $$
-    \frac{\partial y}{\partial x}= \frac{\partial y}{\partial g} \frac{\partial g}{\partial x} + \frac{\partial y}{\partial v} \frac{\partial v}{\partial x} = \underbrace{\operatorname{diag}(v) \sigma^\prime(W_g x) W_g}_{g \text{ channel}} + \underbrace{\operatorname{diag}(g) W_v}_{v \text{ channel}}
+    \begin{aligned}
+    \frac{\partial y_i}{\partial x_k}
+    &=
+    \underbrace{v_i \, \sigma'\left(\sum_j W_{g,ij}x_j\right) W_{g,ik}}_{\text{gate branch}}
+    +
+    \underbrace{g_i W_{v,ik}}_{\text{value branch}}
+    \end{aligned}
     $$
 
-    Here, $\sigma^\prime (W_g x) = \sigma (W_g x) \odot (1 - \sigma(W_g x)) \le 0.25$ elementwise when $\sigma(x) = \frac{1}{1 + e^{-x}}$. Therefore, the $v$ channel provides a linear path for gradients.
+    When $\sigma(x) = \frac{1}{1 + e^{-x}}$, we have $\sigma'(x) = \sigma(x)(1-\sigma(x)) \le 0.25$. Therefore, the gate branch is scaled by the derivative of the nonlinearity, while the value branch has a more direct linear path through $W_v$.
 
 - It is fine to round the dimensions to a nearby multiple of 64 for hardware efficiency.
 
 - Keep an empirical perspective: the exact dimension choice is ultimately an implementation and performance tradeoff.
+
+- The model dimension ratio $\frac{8}{3} = 4 \times \frac{2}{3}$
+    - 4: For $\text{FFN}(x)=\max(0, xW_1+b_1)W_2+b_2$, the best practice is $d_{\text{ff}} = 4 d_{\text{model}}$.
+    - $\frac{2}{3}$: For GLU variants, the number of parameters scales down by $\frac{2}{3}$.
 
 ```python
 class SwiGLU(nn.Module):
