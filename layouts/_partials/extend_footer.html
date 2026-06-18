@@ -1,0 +1,43 @@
+<div class="image-lightbox" hidden aria-modal="true" role="dialog" aria-label="Expanded image">
+    <img class="image-lightbox__image" alt="">
+</div>
+
+<script>
+    (() => {
+        const lightbox = document.querySelector(".image-lightbox");
+        const lightboxImage = lightbox?.querySelector(".image-lightbox__image");
+
+        if (!lightbox || !lightboxImage) {
+            return;
+        }
+
+        function openLightbox(image) {
+            lightboxImage.src = image.currentSrc || image.src;
+            lightboxImage.alt = image.alt || "";
+            lightbox.hidden = false;
+            document.body.classList.add("image-lightbox-open");
+        }
+
+        function closeLightbox() {
+            lightbox.hidden = true;
+            document.body.classList.remove("image-lightbox-open");
+            lightboxImage.removeAttribute("src");
+        }
+
+        document.querySelectorAll(".post-content img:not(.in-text)").forEach((image) => {
+            if (image.closest("a")) {
+                return;
+            }
+
+            image.addEventListener("click", () => openLightbox(image));
+        });
+
+        lightbox.addEventListener("click", closeLightbox);
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && !lightbox.hidden) {
+                closeLightbox();
+            }
+        });
+    })();
+</script>
