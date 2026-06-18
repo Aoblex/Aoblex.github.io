@@ -8,9 +8,9 @@ draft = false
 
 # Introduction
 
-To train an LLM, we need a tokenizer that converts raw text into discrete token IDs, which are then mapped to embeddings for the model to process.
+Assignment 1 starts with building a BPE tokenizer, which takes raw byte sequence as input and produces a sequence of integer token IDs as output.
 
-However, different encoding standards can represent the same text as different byte sequences, which can lead to different tokenizations and therefore different embeddings. For example:
+The first thing we are going to do is to choose an encoding standard, because different encoding standards can represent the same text as different byte sequences, which can lead to different tokenizations and therefore different embeddings. For example:
 
 ```pycon
 >>> "你好".encode(encoding="utf-8")
@@ -23,12 +23,7 @@ b'\xff\xfe\x00\x00`O\x00\x00}Y\x00\x00'
 b'\xc4\xe3\xba\xc3'
 ```
 
-To bridge the gap between raw text and model input, we need two components: an **encoding standard** and a **tokenizer**.
-
-In this assignment, we will focus on:
-
-1. **Encoding** text with the **UTF-8** standard;
-2. **Tokenizing** encoded text with a **BPE** tokenizer.
+In this assignment, we will use the **UTF-8** standard to encode text and then tokenize the encoded byte sequence with a **BPE** tokenizer.
 
 ---
 
@@ -41,7 +36,7 @@ In this assignment, we will focus on:
 ## Code Points
 
 $$
-\text{The Unicode Standard} = \{\text{character(char)}\} \xrightarrow{\text{encoding}} \{\text{code point(int)}\}
+\text{The Unicode Standard} = \{\text{character:} \texttt{char}\} \xrightarrow{\text{encoding}} \{\text{code point:} \texttt{int}\}
 $$
 
 ```python
@@ -58,14 +53,12 @@ $$
 
 In general, we can think of it as **a giant table that maps each character to a unique integer**, called a _code point_. As of [Unicode 17](https://www.unicode.org/versions/Unicode17.0.0/), the standard contains 159,801 characters. In theory, there can be at most 17 * 65,536 = 1,114,112 code points (17 [planes](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-2/#G16433), each with 65,536 code points).
 
-It is worth noting that [the internal representation of a Python string is a compact sequence of Unicode code points](https://stackoverflow.com/questions/1838170/what-is-internal-representation-of-string-in-python-3-x).
-
 ---
 
 ## Unicode Transformation Format
 
 $$
-\text{UTF} = \{\text{code point(int)}\} \xrightarrow{\text{encoding}} \{\text{byte sequence(bytes)}\}
+\text{UTF} = \{\text{code point:} \texttt{int}\} \xrightarrow{\text{encoding}} \{\text{byte sequence:} \texttt{bytes}\}
 $$
 
 A naive fixed-width representation would require up to 4 bytes per code point. To save space, we have [UTF](https://unicode.org/faq/utf_bom#:~:text=(SCSU).-,Q%3A%20What%20is%20a%20UTF%3F,-A%20Unicode%20transformation) (Unicode Transformation Format), an algorithmic mapping from every Unicode code point to a unique byte sequence.
@@ -78,28 +71,17 @@ There are three types of UTF algorithms:
 
 - [UTF-32](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/#G28875): 1 code point = 4 bytes
 
-Among these, UTF-8 is the most widely used encoding on the web, and we will use UTF-8 throughout this assignment.
+Among these, UTF-8 is the most widely used encoding on the web, and we will use it throughout this assignment.
 
 ---
 
 # Levels of Tokenization
 
-{{< figure
-  src="figures/tokenization-level.png"
-  alt="tokenization level"
-  caption="tokenization level"
-  width="400"
-  align="center"
->}}
-
-With UTF-8 encoding, we take a sequence of code points and encode it as **a sequence of bytes** ($\in \\{0, 1, \ldots, 255\\}$).
-These bytes are the input to byte-level tokenization; the tokenizer then produces token IDs for the model.
-
-There are several ways to tokenize this kind of input, primarily based on the level of tokenization:
+There are several ways to tokenize the encoded byte sequences, primarily based on the level of tokenization:
 
 | Level | Definition | Pros | Cons |
 | --- | --- | --- | --- |
-| [Byte](https://arxiv.org/pdf/2105.13626) | 1 token = 1 byte | No OOV token | Longer sequence length |
+| Byte | 1 token = 1 byte | No OOV token | Longer sequence length |
 | Word | 1 token = 1 word | Shorter sequence length | Potential OOV token |
 | Subword | 1 byte ≤ 1 token ≤ 1 word | No OOV token and shorter sequence length | More complex training process |
 
@@ -140,7 +122,7 @@ We can divide BPE training into three stages below.
 
 ### Initialization
 
-BPE initializes the vocabulary with special tokens and 256 byte values.
+We initialize the BPE vocabulary with special tokens and 256 byte values.
 The merges list is initialized as an empty list.
 ```python
 token2id, id2token = {}, {}
@@ -213,7 +195,7 @@ This is the core of the training process: **we iteratively pick the most frequen
 
 After pre-tokenization, we get a giant list of _words_. For faster training, we can compress the _words_ into a dictionary, which contains all the information needed for training:
 
-- all _words_;
+- all unique _words_;
 - frequency of each _word_;
 - the _tokens_ that compose each _word_.
 
@@ -268,10 +250,10 @@ which makes each merge faster but requires more careful bookkeeping.
 
 To separate the **training iterations** and the **computation details**, I designed two classes:
 
-- [`BPETrainer`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L175): the entry point for training.
+- `BPETrainer`: the entry point for training.
     - It stores training parameters, vocab, merges, _etc._;
     - It has a `train` method that does the [loop](#merge-iterations), but does not worry about the implementation details;
-- [`BPECorpus`](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L19): the core of computations.
+- `BPECorpus`: the core of computations.
     - It maintains the related data structures to support fast iterations;
     - It uses multiprocessing for the initial pre-tokenization;
 
@@ -285,90 +267,103 @@ The core data structures are:
 
 ### Profiling
 
-I use [`py-spy`](https://github.com/benfred/py-spy) to profile.
+I use [`py-spy`](https://github.com/benfred/py-spy) with `--subprocesses` to profile the speed and use [`mprof`](https://github.com/pythonprofilers/memory_profiler) to profile the memory usage.
 
-```bash
-uv run py-spy record --subprocesses \
-    -o "output/profile/TinyStories.svg" \
-    -- python cs336_basics/tokenizer/bpe_trainer.py \
-            --input_path "./data/TinyStoriesV2-GPT4-train.txt" \
-            --vocab_size 10000 \
-            --desired_num_chunks 512
+>[!note]- Profiling command
+> Get svg output:
+> ```bash
+> sudo uv run py-spy record --subprocesses \
+>     -o "output/profile/TinyStories.svg" \
+>     -- python cs336_basics/tokenizer/bpe_trainer.py \
+>             --input_path "./data/TinyStoriesV2-GPT4-train.txt" \
+>             --vocab_size 10000 \
+>             --desired_num_chunks 512
+> ```
+> Get text output:
+> ```bash
+> sudo uv run py-spy record --subprocesses \
+>     --format raw \
+>     -o "output/profile/TinyStories.txt" \
+>     -- python cs336_basics/tokenizer/bpe_trainer.py \
+>         --input_path "./data/TinyStoriesV2-GPT4-train.txt" \
+>         --vocab_size 10000 \
+>         --desired_num_chunks 512
+> ```
+> Get memory profile:
+> ```bash
+> uv run --with memory-profiler --with psutil mprof run \
+>     --include-children \
+>     --multiprocess \
+>     --output "output/profile/mprofile_TinyStories.dat" \
+>     python cs336_basics/tokenizer/bpe_trainer.py \
+>         --input_path "./data/TinyStoriesV2-GPT4-train.txt" \
+>         --vocab_size 10000 \
+>         --desired_num_chunks 512
+> ```
+> Check peak memory:
+> ```bash
+> uv run --with memory-profiler --with psutil mprof peak \
+>     "output/profile/mprofile_TinyStories.dat"
+> ```
+
+
+Since `py-spy` is a sampling profiler, the percentages below should be read as approximate shares of sampled stack traces, not as exact wall-clock measurements.
+
+The main bottleneck is the **initialization/pre-tokenization** stage, not the later BPE merge loop. In the current implementation, each worker decodes one chunk, splits it by the special-token pattern, and then runs:
+
+```python
+word2count.update(compiled_pattern.findall(document))
 ```
 
-{{< figure
-    src="./figures/bpe-profile/all.png"
-    alt="Profile Overview"
-    caption="Profile Overview of BPE Training on TinyStories"
-    width="800"
-    align="center"
->}}
+Most samples are under this line. On TinyStories, the profile looks roughly like this:
 
-The leftmost block contains details about the `train` method ([line 290](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L290)), specifically:
-* **initialization** ([line 229](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L229)): time consumed by pre-tokenization;
-* **merge iterations** ([line 246](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/bpe_trainer.py#L246)): time consumed by applying pair merges;
+| Part | Approx. share |
+| --- | ---: |
+| `compiled_pattern.findall(document)` + `word2count.update(...)` wrapper | 59.8% |
+| `Counter.update` internals | 15.6% |
+| Multiprocessing resource tracker | 8.7% |
+| Sending pickled `Counter` results back to the parent process | 8.6% |
+| Receiving/waiting for worker results | 2.9% |
+| Splitting chunks by the special-token regex | 1.0% |
+| Merge iterations: `apply_merge(...)` | 0.4% |
+| Decoding chunks | 0.4% |
 
-{{< figure
-    src="./figures/bpe-profile/train.png"
-    alt="Details in `train`"
-    caption="Details in `train`"
-    width="800"
-    align="center"
->}}
+This makes sense: pre-tokenization has to scan the whole corpus with the regex pattern and count every pre-tokenized word. The BPE merge loop is not the dominant part in this run.
 
-The following two blocks are about **multiprocessing**:
+The merge iterations do show up in the profile, but they account for only a small fraction of the collected samples: `apply_merge(...)` has 99 out of 23502 samples, or about 0.4%. So merge iterations are much cheaper than pre-tokenization and multiprocessing overhead.
 
-- Process communication is about transferring data between processes. When process communication is expensive, optimization should focus on minimizing data transfer, reducing communication frequency, or using more efficient data-sharing mechanisms.
+The profile also shows that multiprocessing is not free. Each worker produces a local `Counter`, and those counters need to be pickled, transferred back to the parent process, and merged into the global `word2count`. This inter-process communication is visible in the profile.
 
-{{< figure
-    src="./figures/bpe-profile/process-communication.png"
-    alt="Process Communication"
-    caption="Process Communication"
-    width="800"
-    align="center"
->}}
+For memory usage, I use `mprof` with `--include-children` and `--multiprocess`, so the reported peak includes the worker processes created during pre-tokenization. On this TinyStories run, `mprof peak` reports:
 
-- The resource tracker introduces overhead when using shared resources in multiprocessing.
+```text
+Using last profile data.
+mprofile_20260618224225.dat     2386.016 MiB
+  Child 41691                   18.266 MiB
+  Child 41692                   118.578 MiB
+  Child 41693                   131.422 MiB
+  Child 41694                   110.578 MiB
+  Child 41695                   114.000 MiB
+  Child 41696                   126.703 MiB
+  Child 41697                   112.422 MiB
+  Child 41698                   119.156 MiB
+  Child 41699                   110.750 MiB
+  Child 41700                   110.438 MiB
+  Child 41701                   118.141 MiB
+```
 
-{{< figure
-    src="./figures/bpe-profile/process-resource_tracker.png"
-    alt="Resource Tracker"
-    caption="Resource Tracker"
-    width="800"
-    align="center"
->}}
+The child-process peaks are around 110-130 MiB for most workers, with one much smaller child at 18.266 MiB. The top-level value is the number I use as the overall peak memory usage: about **2.33 GiB**.
 
-The remaining 10 blocks (my computer has 10 cores) correspond to **the pre-tokenization process for each chunk**:
-
-- finditer(44.5%, [line 67](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/utils.py#L67)): `for match in compiled_pattern.finditer(document):`
-- group(9.3%, [line 68](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/utils.py#L68)): `word = match.group(0)`
-- dict update(23.4%, [line 69](https://github.com/Aoblex/assignment1-basics/blob/main/cs336_basics/tokenizer/utils.py#L69)): `word2count[word] += 1`
-
-{{< figure
-    src="./figures/bpe-profile/pre-tokenize.png"
-    alt="Details in Pre-Tokenization"
-    caption="Details in Pre-Tokenization"
-    width="800"
-    align="center"
->}}
-
-> [!note]- On the choice of profiler
-> I tried to use [`scalene`](https://github.com/plasma-umass/scalene) at first, but it seems to have issues with multiprocessing.
-> So I switched to [`py-spy`](https://github.com/benfred/py-spy). It is based on sampling, and its overhead is very low.
->
-> **Summary:**
->
-> - `scalene`: best for line-level insight, but less stable with multiprocessing
-> - `py-spy`: most robust, ideal for understanding system-level bottlenecks
-> - `cProfile`: precise function-level stats, but limited for multiprocessing and no memory support
+In conclusion, this profiling result gives us some clue to further optimize the implementation:
+- making pre-tokenization/counting cheaper;
+- reducing the amount of data sent back from worker processes;
+- tuning the number of chunks and workers, because too many chunks can increase multiprocessing overhead.
 
 ---
 
 ## BPE: Encoding and Decoding
 
-Given a _vocabulary_ and a _merges_ list, we can now build the tokenizer that does **encoding** and **decoding**.
-
-In a nutshell, we'll need this tokenizer class:
+In this section, we will implement the **encoding** and **decoding** methods:
 
 ```python
 class BPETokenizer:
@@ -382,7 +377,7 @@ BPE encoding can be considered a **replay** of the training process:
 
 1. Split by special tokens (remember to keep them!);
 2. Split by regular expression (must use the same expression as in training);
-3. Tokenize the words we got in step 2:
+3. Tokenize the _words_ we got in step 2:
     1. A non-special-token word is initially byte-level tokenized. For special tokens, convert directly to the token ID;
     2. Find the token pair in the current word with **the smallest merge rank**;
         - merge rank means the index of this pair in the merges list;
@@ -531,16 +526,19 @@ Here are my solutions to the problems given in the writeup.
 > [!note]- Problem (`train_bpe_tinystories`):  BPE Training on TinyStories (2 points)
 > > [!question]- Train a byte-level BPE tokenizer on the TinyStories dataset, using a maximum vocabulary size of 10,000. Make sure to add the TinyStories `<|endoftext|>` special token to the vocabulary. Serialize the resulting vocabulary and merges to disk for further inspection. How much time and memory did training take? What is the longest token in the vocabulary? Does it make sense?
 > > **Answers**:
-> > - It took about 30 seconds. I didn't track memory usage, but it was probably a few GB.
+> > - It took about 20 seconds. The peak memory is about 2.33 GiB.
 > > - The longest token is `b' accomplishment'`, length=15.
 > > - I think it makes sense. It's a valid word.
 >
 > > [!question]- Profile your code. What part of the tokenizer training process takes the most time?
 > > **Answer**:
-> > The most time-consuming part is **the pre-tokenization stage** (about **80%** of all time), specifically:
-> > - `finditer` $\approx$ 45.1%;
-> > - `word = match.group(0)` $\approx$ 8.5%;
-> > - `word2count[word] += 1` $\approx$ 23.4%;
+> > The most time-consuming part is the **pre-tokenization/counting stage**. In the current implementation, the dominant line is:
+> >
+> > ```python
+> > word2count.update(compiled_pattern.findall(document))
+> > ```
+> >
+> > It accounts for most samples in the profile: roughly 60% at that line directly, plus about 16% inside `Counter.update`. Multiprocessing overhead is also visible: sending worker results and resource tracking together account for another noticeable fraction of runtime.
 
 > [!note]- Problem (`train_bpe_expts_owt`):  BPE Training on OpenWebText (2 points)
 > > [!question]- Train a byte-level BPE tokenizer on the OpenWebText dataset, using a maximum vocabulary size of 32,000. Serialize the resulting vocabulary and merges to disk for further inspection. What is the longest token in the vocabulary? Does it make sense?
