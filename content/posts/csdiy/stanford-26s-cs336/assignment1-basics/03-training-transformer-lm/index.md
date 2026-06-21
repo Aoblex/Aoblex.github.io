@@ -553,6 +553,42 @@ Below is an example cosine learning rate schedule:
 
 ---
 
+## Gradient Clipping
+
+_Gradient clipping_ is a trick to stabilize training. We do it by scaling the gradient $g$ (for all parameters) by a factor to make sure $\\|g\\|_2 \leq M$, where $M$ is a given constant. It can be expressed as:
+
+$$
+\hat{g} \leftarrow
+\begin{cases}
+\dfrac{M}{\lVert g \rVert_2 + \varepsilon}\, g,
+& \lVert g \rVert_2 > M, \\[8pt]
+g,
+& \lVert g \rVert_2 \le M.
+\end{cases}
+$$
+
+where $\hat{g}$ is the clipped gradient and $\varepsilon$ is a small constant for numerical stability.
+
+```python
+@torch.no_grad()
+def gradient_clipping(
+    parameters: Iterable[torch.nn.Parameter],
+    max_l2_norm: float,
+    eps: float = 1e-6,
+) -> None:
+    params = [p for p in parameters if p.grad is not None]
+    if not params:
+        return
+
+    l2_norm = sum(p.grad.float().pow(2).sum() for p in params).sqrt()
+    scaling = (max_l2_norm / (l2_norm + eps)).clamp(max=1.0)
+
+    for p in params:
+        p.grad.mul_(scaling)
+```
+
+---
+
 # Solutions
 
 Here are my solutions to the problems given in the writeup.
