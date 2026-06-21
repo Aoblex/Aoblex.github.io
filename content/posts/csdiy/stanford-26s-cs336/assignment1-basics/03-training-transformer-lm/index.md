@@ -589,6 +589,79 @@ def gradient_clipping(
 
 ---
 
+# Training Loop
+
+Before putting all these components together, we need to implement **data loader** and **checkpointing**.
+
+## Data Loader
+
+After tokenization, our input data is a single sequence of token IDs $x = (x_1, \ldots, x_n)$. During training, we repeatedly sample mini-batches of contiguous token sequences from this stream. This makes optimization computationally manageable, introduces useful stochasticity into gradient estimates, and allows efficient training even when the full dataset is too large to fit in memory.
+
+```python
+def get_batch(
+    x: Int[np.ndarray, "..."],
+    batch_size: int,
+    context_length: int,
+    device: torch.device | str,
+) -> tuple[
+    Int[torch.Tensor, "batch_size context_length"],
+    Int[torch.Tensor, "batch_size context_length"],
+]:
+    if x.ndim != 1:
+        raise ValueError("x must be a 1D array of token IDs.")
+    if batch_size <= 0 or context_length <= 0:
+        raise ValueError("batch_size and context_length must be positive.")
+    if len(x) <= context_length:
+        raise ValueError("x must contain more tokens than context_length.")
+
+    # Each start position must leave room for context_length inputs
+    # plus one next-token target.
+    starts = np.random.randint(0, len(x) - context_length, size=batch_size)
+    offsets = np.arange(context_length)
+
+    inputs = x[starts[:, None] + offsets[None, :]]
+    targets = x[starts[:, None] + offsets[None, :] + 1]
+
+    return (
+        torch.as_tensor(inputs, dtype=torch.long, device=device),
+        torch.as_tensor(targets, dtype=torch.long, device=device),
+    )
+```
+
+## Checkpointing
+
+_Checkpointing_ allows us to resume a training run tht stopped midway through. To resume, we need to save model state, optimizer state, current iteration number and other necessary information.
+
+```python
+def save_checkpoint(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    iteration: int,
+    out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
+) -> None:
+    checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "iteration": iteration,
+    }
+    torch.save(checkpoint, out)
+
+
+def load_checkpoint(
+    src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+) -> int:
+    checkpoint = torch.load(src)
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    return checkpoint["iteration"]
+```
+
+---
+
 # Solutions
 
 Here are my solutions to the problems given in the writeup.
