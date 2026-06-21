@@ -488,6 +488,71 @@ class AdamW(torch.optim.Optimizer):
 
 ---
 
+## Learning Rate Scheduling
+
+In practice, it's typical to use a learning rate _schedule_ instead of a constant learning rate. Here we will implement the cosine annealing schedule used in [LLaMA](https://arxiv.org/pdf/2302.13971). It consists of three stages:
+
+- warm-up ($t < T_w$): $$\alpha_t = \frac{t}{T_w} \alpha_{\max},$$
+- cosine annealing ($T_w \leq t \leq T_c$): $$\alpha_t = \alpha_{\min} + \frac{1}{2}\left(1 + \cos\left(\frac{t-T_w}{T_c-T_w}\pi\right)\right)(\alpha_{\max} - \alpha_{\min}),$$
+- post-annealing ($t > T_c$): $$\alpha_t = \alpha_{\min},$$
+
+Below is an example cosine learning rate schedule:
+
+{{< figure
+  src="figures/learning_rate_schedule.png"
+  alt="Cosine learning rate schedule with warmup"
+  caption="Cosine learning rate schedule with linear warmup, as used in LLaMA."
+  width="60%"
+  align="center"
+>}}
+
+>[!note]- Notation
+> - $\alpha_t$: learning rate at step $t$
+> - $\alpha_{\max}$: peak learning rate (reached at the end of warm-up)
+> - $\alpha_{\min}$: minimum learning rate (held after cosine annealing ends)
+> - $t$: current step/iteration number
+> - $T_w$: number of warm-up steps
+> - $T_c$: number of cosine annealing steps (end of the decay phase)
+
+>[!experiment]- Learning Rate Plot Code
+> ```python
+> import numpy as np
+> import matplotlib.pyplot as plt
+>
+> alpha_max = 3e-4
+> alpha_min = 3e-5
+> T_w = 500
+> T_c = 6000
+> T_total = 12000
+>
+>
+> if __name__ == "__main__":
+>     def learning_rate(t):
+>         if t < T_w:
+>             return (t / T_w) * alpha_max
+>         elif t <= T_c:
+>             cosine = 0.5 * (1 + np.cos((t - T_w) / (T_c - T_w) * np.pi))
+>             return alpha_min + cosine * (alpha_max - alpha_min)
+>         return alpha_min
+>
+>     steps = np.arange(T_total + 1)
+>     lrs = np.array([learning_rate(t) for t in steps])
+>
+>     plt.plot(steps, lrs, label="Learning rate")
+>     plt.axvline(T_w, linestyle="--", label=r"$T_w$ (warm-up end)")
+>     plt.axvline(T_c, linestyle=":", label=r"$T_c$ (cosine decay end)")
+>
+>     plt.xlabel("Training step")
+>     plt.ylabel("Learning rate")
+>     plt.title("Cosine Annealing Learning Rate Schedule")
+>     plt.legend()
+>     plt.grid(True)
+>
+>     plt.savefig("learning_rate_schedule.png", dpi=300, bbox_inches="tight")
+> ```
+
+---
+
 # Solutions
 
 Here are my solutions to the problems given in the writeup.
