@@ -57,14 +57,27 @@ $$
 y = W x
 $$
 
-The forward function:
-
 ```python
 class Linear(nn.Module):
+    def __init__(
+        self,
+        d_in: int,
+        d_out: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        weight = torch.empty(d_out, d_in, device=device, dtype=dtype)
+        mean, std = 0.0, math.sqrt(2 / (d_in + d_out))
+        nn.init.trunc_normal_(weight, mean=mean, std=std, a=-3 * std, b=3 * std)
+        self.weight = torch.nn.Parameter(data=weight, requires_grad=True)
+
     def forward(
         self,
         x: Float[torch.Tensor, "... d_in"],
-    ) -> Float[torch.Tensor, "... d_out"]: ...
+    ) -> Float[torch.Tensor, "... d_out"]:
+        return x @ self.weight.T
+
 ```
 
 Note that we do not include a bias term, following most modern LLMs.
@@ -79,14 +92,29 @@ $$
 y = \text{Embeddings[}x\text{]}
 $$
 
-It's actually an indexing operation. The forward function:
+It's actually an indexing operation.
 
 ```python
 class Embedding(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        d_model: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        weight = torch.empty(vocab_size, d_model, device=device, dtype=dtype)
+        nn.init.trunc_normal_(weight, mean=0.0, std=1.0, a=-3.0, b=3.0)
+
+        self.weight = nn.Parameter(data=weight, requires_grad=True)
+
     def forward(
         self,
         token_ids: Int[torch.Tensor, "batch seqlen"],
     ) -> Float[torch.Tensor, "batch seqlen d_model"]:
+        return einx.get_at("[vocab_size] d_model, batch seqlen -> batch seqlen d_model", self.weight, token_ids)
+
 ```
 
 ---
@@ -114,14 +142,31 @@ where $a \in \mathbb{R}^{d_{model}}$ is the input activation vector, and $g \in 
 
 One practical motivation for RMSNorm is that normalization is often much more expensive than its FLOP count suggests. In the table above, statistical normalization accounts for only $0.17\%$ of FLOPs, but takes $25.5\%$ of the PyTorch runtime. These operators are dominated by reductions and data movement, not arithmetic. RMSNorm removes the mean-centering step from LayerNorm, so it is simpler to compute and usually faster in practice. This is why modern LLM implementations commonly replace LayerNorm with RMSNorm: it can bring a noticeable speedup while leaving model quality almost unchanged.
 
-The forward function:
-
 ```python
 class RMSNorm(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        eps: float = 1e-5,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self.d_model = d_model
+        self.eps = eps
+        weight = torch.ones(size=(d_model,), device=device, dtype=dtype)
+        self.weight = torch.nn.Parameter(data=weight, requires_grad=True)
+
     def forward(
         self,
         x: Float[torch.Tensor, "... d_model"],
-    ) -> Float[torch.Tensor, "... d_model"]: ...
+    ) -> Float[torch.Tensor, "... d_model"]:
+        in_type = x.dtype
+        x = x.to(torch.float32)
+        denom = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
+        numer = x * self.weight
+        result = numer / denom
+        return result.to(in_type)
 ```
 
 ---
@@ -170,14 +215,32 @@ Some heuristic arguments from the writeup:
 
 - The model dimension ratio $\frac{8}{3} = 4 \times \frac{2}{3}$
     - 4: For $\text{FFN}(x)=\max(0, xW_1+b_1)W_2+b_2$, the best practice is $d_{\text{ff}} = 4 d_{\text{model}}$.
-    - $\frac{2}{3}$: For GLU variants, the number of parameters scales down by $\frac{2}{3}$.
+    - $\frac{2}{3}$: For GLU variants, the number of parameters scales down by $\frac{2}{3}$ to keep it the same as FFN.
 
 ```python
 class SwiGLU(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+
+        self.w1 = Linear(d_in=d_model, d_out=d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(d_in=d_ff, d_out=d_model, device=device, dtype=dtype)
+        self.w3 = Linear(d_in=d_model, d_out=d_ff, device=device, dtype=dtype)
+        self.silu = SiLU()
+
     def forward(
         self,
         x: Float[torch.Tensor, "... d_model"],
-    ) -> Float[torch.Tensor, "... d_model"]: ...
+    ) -> Float[torch.Tensor, "... d_model"]:
+        values = self.w3(x)
+        gates = self.silu(self.w1(x))
+        return self.w2(values * gates)
+
 ```
 
 ---
@@ -236,6 +299,7 @@ q_{d-1}
 \end{pmatrix}
 $$
 
+in which $\theta_{i} = \theta^{-\frac{2i}{d}}$ and $\theta$ is a base constant for us to choose.
 Then relative position information is encoded in the attention weights:
 
 $$
@@ -246,11 +310,53 @@ $$
 
 ```python
 class RoPE(nn.Module):
+    def __init__(
+        self,
+        d_k: int,
+        max_seq_len: int,
+        theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        assert d_k % 2 == 0, "d_k must be divisible by 2 in RoPE!"
+        super().__init__()
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+        pos = torch.arange(0, max_seq_len) # (max_seq_len,)
+        dim = torch.arange(0, d_k // 2) # (d_k//2,)
+        base_theta = theta ** (-(2.0 * dim) / d_k) # (d_k//2,)
+        freqs = torch.outer(pos, base_theta).to(device=device, dtype=dtype) # (max_seq_len, d_k//2)
+        self.register_buffer("cos", freqs.cos(), persistent=False)
+        self.register_buffer("sin", freqs.sin(), persistent=False)
+
     def forward(
         self,
         x: Float[torch.Tensor, "... seqlen d_k"],
         token_positions: Int[torch.Tensor, "... seqlen"],
-    ) -> Float[torch.Tensor, "... seqlen d_k"]: ...
+    ) -> Float[torch.Tensor, "... seqlen d_k"]:
+        seqlen, d_k = x.shape[-2], x.shape[-1]
+        assert seqlen <= self.max_seq_len, f"Current seqlen={seqlen} > max_seq_len={self.max_seq_len}!"
+        assert d_k == self.d_k, f"Input d_k={d_k} != RoPE d_k={self.d_k}"
+        assert torch.max(token_positions) < self.max_seq_len, "Token position exceeded."
+
+        # in case token_positions does not have the batch dimension
+        assert token_positions.shape[-1] == seqlen
+        token_positions = torch.broadcast_to(token_positions, x.shape[:-1])
+
+        cos_freqs = einx.get_at("[position] half_dk, ... seqlen -> ... seqlen half_dk", self.cos, token_positions)
+        sin_freqs = einx.get_at("[position] half_dk, ... seqlen -> ... seqlen half_dk", self.sin, token_positions)
+        x_pairs = einx.id("... seqlen (half_dk two) -> ... seqlen half_dk two", x, two=2)
+        rotation = einx.id(
+            "... seqlen half_dk, ... seqlen half_dk, ... seqlen half_dk, ... seqlen half_dk -> ... seqlen half_dk (1 + 1) (1 + 1)",
+            cos_freqs, -sin_freqs, sin_freqs, cos_freqs,
+        )
+
+        x_rotated = einx.dot(
+            "... seqlen half_dk two_row [two_col], ... seqlen half_dk [two_col] -> ... seqlen (half_dk two_row)",
+            rotation, x_pairs,
+        )
+
+        return x_rotated
 ```
 
 ---
@@ -267,13 +373,25 @@ where $Q \in \mathbb{R}^{n \times d_k}, K \in \mathbb{R}^{m \times d_k}, V \in \
 
 ```python
 class ScaledDotProductAttention(nn.Module):
+    def __init__(
+        self,
+    ) -> None:
+        super().__init__()
+        self.softmax = Softmax()
+
     def forward(
         self,
         Q: Float[torch.Tensor, "... queries d_k"],
         K: Float[torch.Tensor, "... keys d_k"],
         V: Float[torch.Tensor, "... keys d_v"],
         mask: Bool[torch.Tensor, "... queries keys"] | None = None,
-    ) -> Float[torch.Tensor, "... queries d_v"]: ...
+    ) -> Float[torch.Tensor, "... queries d_v"]:
+        assert Q.shape[-1] == K.shape[-1], "Q, K last dim does not match!"
+        d_k = Q.shape[-1]
+        attention_scores = einx.dot("... queries d_k, ... keys d_k -> ... queries keys", Q, K)
+        if mask is not None:
+            attention_scores.masked_fill_(mask == 0, float("-inf"))
+        return (self.softmax(attention_scores / math.sqrt(d_k))) @ V
 ```
 
 ---
@@ -293,19 +411,87 @@ $$
 \text{MultiHeadSelfAttention}(x) = W_O \text{MultiHeadAttention}(W_Qx, W_Kx, W_Vx) \\
 $$
 
-Some implementation details:
+```python
+class MultiheadSelfAttention(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        max_seq_len: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        assert d_model % num_heads == 0, "d_model not divisible by num_heads!"
+        super().__init__()
 
-- Causal: apply a lower triangular `mask` to prevent the current query from attending to future tokens. (1: attend, 0: ignore)
+        self.q_proj = Linear(d_in=d_model, d_out=d_model, device=device, dtype=dtype)
+        self.k_proj = Linear(d_in=d_model, d_out=d_model, device=device, dtype=dtype)
+        self.v_proj = Linear(d_in=d_model, d_out=d_model, device=device, dtype=dtype)
+        self.output_proj = Linear(d_in=d_model, d_out=d_model, device=device, dtype=dtype)
+        self.num_heads = num_heads
+        self.sdpa = ScaledDotProductAttention()
+        self.register_buffer("mask", torch.tril(torch.ones(max_seq_len, max_seq_len)), persistent=False)
 
-- RoPE: add positional information to **queries** and **keys** with RoPE. Each head is processed independently. **Do not** apply RoPE to value vectors.
+    def forward(
+        self,
+        x: Float[torch.Tensor, "... seqlen d_model"],
+    ) -> Float[torch.Tensor, "... seqlen d_model"]:
+        seqlen, d_model = x.shape[-2], x.shape[-1]
+        Q = self.q_proj(x)
+        K = self.k_proj(x)
+        V = self.v_proj(x)
+
+        Q = einx.id("... seqlen (num_heads d_k) -> ... num_heads seqlen d_k", Q, num_heads=self.num_heads)
+        K = einx.id("... seqlen (num_heads d_k) -> ... num_heads seqlen d_k", K, num_heads=self.num_heads)
+        V = einx.id("... seqlen (num_heads d_v) -> ... num_heads seqlen d_v", V, num_heads=self.num_heads)
+
+        causal_mask = self.mask[:seqlen, :seqlen]
+        mha_result = einx.id("... num_heads seqlen d_v -> ... seqlen (num_heads d_v)", self.sdpa(Q, K, V, causal_mask))
+        return self.output_proj(mha_result)
+```
+
+With RoPE, we apply the RoPE projections to **queries** and **keys**:
 
 ```python
-class MultiheadSelfAttentionWithRoPE(nn.Module):
+class MultiheadSelfAttentionWithRoPE(MultiheadSelfAttention):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        max_seq_len: int,
+        theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__(d_model, num_heads, max_seq_len, device, dtype)
+        self.rope = RoPE(
+            d_k=d_model // num_heads,
+            max_seq_len=max_seq_len,
+            theta=theta,
+            device=device,
+            dtype=dtype,
+        )
+
     def forward(
         self,
         x: Float[torch.Tensor, "... seqlen d_model"],
         token_positions: Int[torch.Tensor, "... seqlen"],
     ) -> Float[torch.Tensor, "... seqlen d_model"]:
+        seqlen, d_model = x.shape[-2], x.shape[-1]
+        Q = self.q_proj(x)
+        K = self.k_proj(x)
+        V = self.v_proj(x)
+
+        Q = einx.id("... seqlen (num_heads d_k) -> ... num_heads seqlen d_k", Q, num_heads=self.num_heads)
+        K = einx.id("... seqlen (num_heads d_k) -> ... num_heads seqlen d_k", K, num_heads=self.num_heads)
+        V = einx.id("... seqlen (num_heads d_v) -> ... num_heads seqlen d_v", V, num_heads=self.num_heads)
+
+        Q = self.rope(Q, token_positions)
+        K = self.rope(K, token_positions)
+
+        causal_mask = self.mask[:seqlen, :seqlen]
+        mha_result = einx.id("... num_heads seqlen d_v -> ... seqlen (num_heads d_v)", self.sdpa(Q, K, V, causal_mask))
+        return self.output_proj(mha_result)
 ```
 
 ---
@@ -316,15 +502,43 @@ The structure of a Transformer block is shown [here](#transformer-lm).
 
 ```python
 class TransformerBlock(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int,
+        num_heads: int,
+        max_seq_len: int,
+        theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self.attn = MultiheadSelfAttentionWithRoPE(
+            d_model=d_model,
+            num_heads=num_heads,
+            max_seq_len=max_seq_len,
+            theta=theta,
+            device=device,
+            dtype=dtype,
+        )
+        self.ffn = SwiGLU(
+            d_model=d_model,
+            d_ff=d_ff,
+            device=device,
+            dtype=dtype,
+        )
+        self.ln1 = RMSNorm(d_model=d_model, device=device, dtype=dtype)
+        self.ln2 = RMSNorm(d_model=d_model, device=device, dtype=dtype)
+
     def forward(
         self,
         x: Float[torch.Tensor, "... seqlen d_model"],
         token_positions: Int[torch.Tensor, "... seqlen"],
-        mask: Bool[torch.Tensor, "... seqlen seqlen"] | None = None,
     ) -> Float[torch.Tensor, "... seqlen d_model"]:
-        x = x + self.attn(self.ln1(x), token_positions, mask)
+        x = x + self.attn(self.ln1(x), token_positions)
         x = x + self.ffn(self.ln2(x))
         return x
+
 ```
 
 ---
@@ -335,6 +549,49 @@ Putting all these components together gives us the full Transformer model:
 
 ```python
 class Transformer(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        d_model: int,
+        d_ff: int,
+        num_heads: int,
+        max_seq_len: int,
+        theta: float,
+        num_layers: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self.token_embeddings = Embedding(
+            vocab_size=vocab_size,
+            d_model=d_model,
+            device=device,
+            dtype=dtype,
+        )
+        self.layers = torch.nn.ModuleList([
+            TransformerBlock(
+                d_model=d_model,
+                d_ff=d_ff,
+                num_heads=num_heads,
+                max_seq_len=max_seq_len,
+                theta=theta,
+                device=device,
+                dtype=dtype,
+            )
+            for _ in range(num_layers)
+        ])
+        self.ln_final = RMSNorm(
+            d_model=d_model,
+            device=device,
+            dtype=dtype,
+        )
+        self.lm_head = Linear(
+            d_in=d_model,
+            d_out=vocab_size,
+            device=device,
+            dtype=dtype,
+        )
+
     def forward(
         self,
         x: Int[torch.Tensor, "batch seqlen"],
@@ -346,6 +603,7 @@ class Transformer(nn.Module):
         x = self.ln_final(x)
         x = self.lm_head(x)
         return x
+
 ```
 
 ---
