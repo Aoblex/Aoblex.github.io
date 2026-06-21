@@ -379,184 +379,126 @@ Notation:
 
 - $v$: vocabulary size;
 
-- $L$: number of layers;
+- $l$: number of layers;
 
 ## Compute
 
-The embedding layer is just a lookup, so we count it as **0 FLOPs** under this matrix-multiply accounting.
-We also ignore RMSNorm, RoPE, softmax, masking, residual additions, and activation functions in the main formula.
-These operations matter in real implementations, but their FLOP counts are usually smaller than the large matrix multiplications below.
+Here we only count matrix multiplications and ignore other operations like embedding, RMSNorm, RoPE, softmax, masking, residual additions, _etc._.
+These operations matter in real implementations, but their FLOP counts are usually smaller than the large matrix multiplications.
 
-{{< collapse summary="Attention: \(8nd^2 + 4n^2d\)" >}}
+The matrix multiply FLOPs in one transformer forward is counted below (`batch_size=1`):
 
-Let $X \in \mathbb{R}^{n \times d}$ be the input to one Transformer block.
-
-The query, key, and value projections are:
-
-$$
-XW_Q,\quad XW_K,\quad XW_V.
-$$
-
-Each one multiplies an $(n \times d)$ matrix by a $(d \times d)$ matrix, so each costs $2nd^2$ FLOPs.
-Together:
-
-$$
-\text{QKV projections} = 3 \cdot 2nd^2 = 6nd^2.
-$$
-
-For attention scores, each head computes:
-
-$$
-Q_iK_i^\top,
-\quad
-Q_i, K_i \in \mathbb{R}^{n \times d^{\prime}}.
-$$
-
-One head costs $2n^2d^{\prime}$ FLOPs.
-Across $h$ heads:
-
-$$
-h \cdot 2n^2d^{\prime} = 2n^2d.
-$$
-
-For the weighted value sum, each head computes:
-
-$$
-A_iV_i,
-\quad
-A_i \in \mathbb{R}^{n \times n},
-\quad
-V_i \in \mathbb{R}^{n \times d^{\prime}}.
-$$
-
-Across all heads, this also costs:
-
-$$
-h \cdot 2n^2d^{\prime} = 2n^2d.
-$$
-
-Finally, the output projection multiplies an $(n \times d)$ matrix by a $(d \times d)$ matrix:
-
-$$
-X_{\text{attn}}W_O,
-$$
-
-which costs:
-
-$$
-2nd^2.
-$$
-
-Therefore, attention costs:
-
-$$
-\text{attention FLOPs}
-= 6nd^2 + 2n^2d + 2n^2d + 2nd^2
-= 8nd^2 + 4n^2d.
-$$
-
+{{< collapse summary="Transformer: $8nd^2l + 4n^2dl + 6ndd_{\text{ff}}l + 2ndv$" >}}
+{{< collapse summary="Transformer Block ($\times l$): $l \times (8nd^2 + 4n^2d + 6ndd_{\text{ff}})$" >}}
+{{< collapse summary="Attention Block: $8nd^2 + 4n^2d$" >}}
+{{< collapse summary="Q, K, V Projection: $6nd^2$" >}}
+- Shape: $(n, d) \xrightarrow{(d, 3d)} (n, 3d) \rightarrow (3, n, d)$
+- FLOPs: $6nd^2$
+{{< /collapse >}}
+{{< collapse summary="Attention Scores: $2n^2d$" >}}
+- Shape: $(h, n, d^{\prime}) \xrightarrow{(h, d^{\prime}, n)} (h, n, n)$
+- FLOPs: $h \times 2n^2d^{\prime} = 2n^2d$
+{{< /collapse >}}
+{{< collapse summary="Attention Weights: $2n^2d$" >}}
+- Shape: $(h, n, n) \xrightarrow{(h, n, d^{\prime})} (h, n, d^{\prime}) \rightarrow (n, d)$
+- FLOPs: $h \times 2n^2d^{\prime} = 2n^2d$
+{{< /collapse >}}
+{{< collapse summary="Output Projection: $2nd^2$" >}}
+- Shape: $(n, d) \xrightarrow{(d, d)} (n, d)$
+- FLOPs: $2nd^2$
+{{< /collapse >}}
+{{< /collapse >}}
+{{< collapse summary="FFN Block: $6ndd_{\text{ff}}$" >}}
+{{< collapse summary="Gate: $2ndd_{\text{ff}}$" >}}
+- Shape: $(n, d) \xrightarrow{(d, d_{\text{ff}})} (n, d_{\text{ff}})$
+- FLOPs: $2ndd_{\text{ff}}$
+{{< /collapse >}}
+{{< collapse summary="Value: $2ndd_{\text{ff}}$" >}}
+- Shape: $(n, d) \xrightarrow{(d, d_{\text{ff}})} (n, d_{\text{ff}})$
+- FLOPs: $2ndd_{\text{ff}}$
+{{< /collapse >}}
+{{< collapse summary="Output: $2ndd_{\text{ff}}$" >}}
+- Shape: $(n, d_{\text{ff}}) \xrightarrow{(d_{\text{ff}}, d)} (n, d)$
+- FLOPs: $2ndd_{\text{ff}}$
+{{< /collapse >}}
+{{< /collapse >}}
+{{< /collapse >}}
+{{< collapse summary="Output Embedding: $2ndv$" >}}
+- Shape: $(n, d) \xrightarrow{(d, v)} (n, v)$
+- FLOPs: $2ndv$
+{{< /collapse >}}
 {{< /collapse >}}
 
-{{< collapse summary="FFN: \(6ndd_{\text{ff}}\)" >}}
-
-For SwiGLU, the three matrix multiplications are:
-
-$$
-XW_1,\quad XW_3,\quad X_{\text{up}}W_2,
-$$
-
-where:
-
-$$
-W_1, W_3 \in \mathbb{R}^{d \times d_{\text{ff}}},
-\quad
-W_2 \in \mathbb{R}^{d_{\text{ff}} \times d}.
-$$
-
-The first two projections each cost:
-
-$$
-2ndd_{\text{ff}}.
-$$
-
-The down projection also costs:
-
-$$
-2nd_{\text{ff}}d.
-$$
-
-Therefore, the FFN costs:
-
-$$
-\text{FFN FLOPs} = 6ndd_{\text{ff}}.
-$$
-
-{{< /collapse >}}
-
-{{< collapse summary="LM Head: \(2ndv\)" >}}
-
-The LM head multiplies:
-
-$$
-XW_{\text{lm}},
-$$
-
-where $X \in \mathbb{R}^{n \times d}$ and $W_{\text{lm}} \in \mathbb{R}^{d \times v}$.
-Therefore:
-
-$$
-\text{LM head FLOPs} = 2ndv.
-$$
-
-{{< /collapse >}}
-
-For one Transformer block:
-
-$$
-\text{block FLOPs} = 8nd^2 + 4n^2d + 6ndd_{\text{ff}}.
-$$
-
-For $L$ layers plus the final LM head:
-
-$$
-\begin{align*}
-\text{total FLOPs}
-= L(8nd^2 + 4n^2d + 6ndd_{\text{ff}}) + 2ndv.
-\end{align*}
-$$
-
-This formula makes the dominant terms easier to see:
-
-- Attention has a quadratic sequence-length term: $4n^2d$.
-- Projection and FFN costs scale linearly with sequence length but quadratically, or near-quadratically, with width: $8nd^2$ and $6ndd_{\text{ff}}$.
-- The LM head can be expensive when the vocabulary is large: $2ndv$.
+This formula makes the dominant terms easier to see.
 
 ## Memory
 
-For memory, we first count **parameter memory**.
-Assume all parameters use `float32`, so each scalar takes $4$ bytes.
+The number of trainable parameters of the given transformer architecture is counted below:
 
-| Component | Parameters | Memory |
-| --- | --- | --- |
-| Token embedding | $vd$ | $4vd$ bytes |
-| Attention projections per layer ($W_Q, W_K, W_V, W_O$) | $4d^2$ | $16d^2$ bytes |
-| SwiGLU FFN per layer ($W_1, W_2, W_3$) | $3dd_{\text{ff}}$ | $12dd_{\text{ff}}$ bytes |
-| RMSNorms per layer | $2d$ | $8d$ bytes |
-| Final RMSNorm | $d$ | $4d$ bytes |
-| LM head | $dv$ | $4dv$ bytes |
+{{< collapse summary="Transformer: $4d^2l + 3dd_{\text{ff}}l + 2dl + 2dv + d$" >}}
 
-Therefore, the total parameter memory is:
+{{< collapse summary="Input Embedding: $dv$" >}}
+- Shape: $(d, v)$
+- Parameters: $dv$
+{{< /collapse >}}
 
-$$
-\begin{align*}
-\text{parameter memory}
-= 4vd + L(16d^2 + 12dd_{\text{ff}} + 8d) + 4d + 4dv \text{ bytes}.
-\end{align*}
-$$
+{{< collapse summary="Transformer Block ($\times l$): $l \times (4d^2 + 3dd_{\text{ff}} + 2d)$" >}}
+{{< collapse summary="Attention Block: $4d^2 + d$" >}}
+{{< collapse summary="RMSNorm: $d$" >}}
+- Shape: $(d,)$
+- Parameters: $d$
+{{< /collapse >}}
+{{< collapse summary="Q: $d^2$" >}}
+- Shape: $(h, d, d^{\prime})$
+- Parameters: $d^2$
+{{< /collapse >}}
+{{< collapse summary="K: $d^2$" >}}
+- Shape: $(h, d, d^{\prime})$
+- Parameters: $d^2$
+{{< /collapse >}}
+{{< collapse summary="V: $d^2$" >}}
+- Shape: $(h, d, d^{\prime})$
+- Parameters: $d^2$
+{{< /collapse >}}
+{{< collapse summary="Output Projection: $d^2$" >}}
+- Shape: $(d, d)$
+- Parameters: $d^2$
+{{< /collapse >}}
+{{< /collapse >}}
+{{< collapse summary="FFN Block: $3dd_{\text{ff}} + d$" >}}
+{{< collapse summary="RMSNorm: $d$" >}}
+- Shape: $(d,)$
+- Parameters: $d$
+{{< /collapse >}}
+{{< collapse summary="Gate Projection: $dd_{\text{ff}}$" >}}
+- Shape: $(d, d_{\text{ff}})$
+- Parameters: $dd_{\text{ff}}$
+{{< /collapse >}}
+{{< collapse summary="Value Projection: $dd_{\text{ff}}$" >}}
+- Shape: $(d, d_{\text{ff}})$
+- Parameters: $dd_{\text{ff}}$
+{{< /collapse >}}
+{{< collapse summary="Output Projection: $dd_{\text{ff}}$" >}}
+- Shape: $(d_{\text{ff}}, d)$
+- FLOPs: $dd_{\text{ff}}$
+{{< /collapse >}}
+{{< /collapse >}}
+{{< /collapse >}}
 
-If the token embedding and LM head weights are tied, remove one of the $4vd$ terms.
+{{< collapse summary="Output Norm: $d$" >}}
+- Shape: $(d,)$
+- Parameters: $d$
+{{< /collapse >}}
 
-This parameter count does **not** include activation memory, gradients, optimizer states, KV cache, or temporary buffers.
+{{< collapse summary="Output Embedding: $dv$" >}}
+- Shape: $(d, v)$
+- FLOPs: $dv$
+{{< /collapse >}}
+{{< /collapse >}}
+
+The memory usage can then be easily computed by multiplying the element size. $4$ for `float32` and 2 for `float16` or `bfloat16`.
+
+Notice that this parameter count does not include activation memory, gradients, optimizer states, KV cache, temporary buffers, _etc._.
 For example, a materialized causal mask uses $O(n^2)$ memory, and RoPE cosine/sine caches use $O(nd^{\prime})$ memory.
 During training, activations and optimizer states usually dominate the additional memory beyond the parameters.
 
@@ -593,7 +535,7 @@ During training, activations and optimizer states usually dominate the additiona
 >     d_ff: int,
 >     h: int,
 >     v: int,
->     L: int,
+>     l: int,
 >     *,
 >     bytes_per_param: int = 4,
 >     tied_embeddings: bool = False,
@@ -607,19 +549,19 @@ During training, activations and optimizer states usually dominate the additiona
 >
 >     param_counts = {
 >         "Token embedding": v * d,
->         "Attention projections": L * 4 * d**2,
->         "SwiGLU FFN": L * 3 * d * d_ff,
->         "RMSNorm": L * 2 * d + d,
+>         "Attention projections": l * 4 * d**2,
+>         "SwiGLU FFN": l * 3 * d * d_ff,
+>         "RMSNorm": l * 2 * d + d,
 >         "LM head": 0 if tied_embeddings else v * d,
 >     }
 >     total_params = sum(param_counts.values())
 >     total_memory = total_params * bytes_per_param
 >
 >     flops = {
->         "Attention projections": L * 8 * n * d**2,
->         "Attention scores": L * 2 * n**2 * d,
->         "Attention value mix": L * 2 * n**2 * d,
->         "SwiGLU FFN": L * 6 * n * d * d_ff,
+>         "Attention projections": l * 8 * n * d**2,
+>         "Attention scores": l * 2 * n**2 * d,
+>         "Attention value mix": l * 2 * n**2 * d,
+>         "SwiGLU FFN": l * 6 * n * d * d_ff,
 >         "LM head": 2 * n * d * v,
 >     }
 >     total_flops = sum(flops.values())
@@ -630,7 +572,7 @@ During training, activations and optimizer states usually dominate the additiona
 >                 f"[bold]n[/bold]={n:,}, [bold]d[/bold]={d:,}, "
 >                 f"[bold]d_ff[/bold]={d_ff:,}, [bold]h[/bold]={h:,}, "
 >                 f"[bold]d_head[/bold]={d_head:,}",
->                 f"[bold]v[/bold]={v:,}, [bold]L[/bold]={L:,}, "
+>                 f"[bold]v[/bold]={v:,}, [bold]l[/bold]={l:,}, "
 >                 f"[bold]dtype bytes[/bold]={bytes_per_param}",
 >             ]),
 >             title="Transformer Resource Accounting",
@@ -696,7 +638,7 @@ During training, activations and optimizer states usually dominate the additiona
 >         d_ff=4288,
 >         h=25,
 >         v=50257,
->         L=48,
+>         l=48,
 >         save_svg_path=f"figures/transformer_resource_accounting_n{n}.svg",
 >     )
 > ```
@@ -722,21 +664,20 @@ Here are my solutions to the problems given in the writeup.
 > > ```
 > > Suppose we constructed our model using this configuration. How many trainable parameters would our model have? Assuming each parameter is represented using single-precision floating point, how much memory is required to just load this model?
 > >
-> > **Answer**: Under the assignment architecture, assuming the token embedding and LM head are **not** tied, the parameter count is:
+> > **Answer**: Under the assignment architecture, the parameter count is:
 > >
 > > | Component | Parameters |
 > > | --- | ---: |
 > > | Token embedding | $vd = 50{,}257 \times 1{,}600 = 80{,}411{,}200$ |
-> > | Attention projections | $L \cdot 4d^2 = 48 \cdot 4 \cdot 1{,}600^2 = 491{,}520{,}000$ |
-> > | SwiGLU FFN | $L \cdot 3dd_{\text{ff}} = 48 \cdot 3 \cdot 1{,}600 \cdot 4{,}288 = 987{,}955{,}200$ |
-> > | RMSNorm | $L \cdot 2d + d = 155{,}200$ |
+> > | Attention projections | $l \cdot 4d^2 = 48 \cdot 4 \cdot 1{,}600^2 = 491{,}520{,}000$ |
+> > | SwiGLU FFN | $l \cdot 3dd_{\text{ff}} = 48 \cdot 3 \cdot 1{,}600 \cdot 4{,}288 = 987{,}955{,}200$ |
+> > | RMSNorm | $l \cdot 2d + d = 155{,}200$ |
 > > | LM head | $dv = 1{,}600 \times 50{,}257 = 80{,}411{,}200$ |
 > > | **Total** | **$1{,}640{,}452{,}800$** |
 > >
 > > So the model has about **1.64B trainable parameters**.
 > > With single-precision floating point, each parameter takes $4$ bytes, so loading just the parameters requires $1{,}640{,}452{,}800 \times 4 = 6{,}561{,}811{,}200$ bytes, or about **6.11 GiB**.
 > >
-> > If the token embedding and LM head are tied, remove one $vd$ term; the total becomes $1{,}560{,}041{,}600$ parameters, or about $5.81$ GiB in float32.
 >
 > > [!question]- Identify the matrix multiplies required to complete a forward pass of our GPT-2 XL-shaped model. How many FLOPs do these matrix multiplies require in total? Assume that our input sequence has `context_length` tokens.
 > >
@@ -748,7 +689,7 @@ Here are my solutions to the problems given in the writeup.
 > > 4. SwiGLU FFN: gate, up, and down projections, costing $6ndd_{\text{ff}}$ FLOPs per layer.
 > > 5. LM head: final vocabulary projection, costing $2ndv$ FLOPs once.
 > >
-> > For GPT-2 XL-shaped configuration with $n=1024$, $d=1600$, $d_{\text{ff}}=4288$, $v=50257$, and $L=48$:
+> > For GPT-2 XL-shaped configuration with $n=1024$, $d=1600$, $d_{\text{ff}}=4288$, $v=50257$, and $l=48$:
 > >
 > > | Component | FLOPs | Share |
 > > | --- | ---: | ---: |
@@ -782,8 +723,8 @@ Here are my solutions to the problems given in the writeup.
 > > | XL | $3.5168 \times 10^{12}$ | 28.62% | 4.58% | 4.58% | 57.53% | 4.68% |
 > >
 > > As the model gets wider and deeper while the context length stays fixed at $1024$, the **FFN and attention projection terms take up more of the total FLOPs**.
-> > The **LM head becomes proportionally smaller**, because it scales like $O(ndv)$ while the per-layer projection and FFN costs scale like $O(Lnd^2)$ and $O(Lndd_{\text{ff}})$.
-> > The quadratic sequence terms also become proportionally smaller because $n$ is fixed while $d$ and $L$ increase.
+> > The **LM head becomes proportionally smaller**, because it scales like $O(ndv)$ while the per-layer projection and FFN costs scale like $O(lnd^2)$ and $O(lndd_{\text{ff}})$.
+> > The quadratic sequence terms also become proportionally smaller because $n$ is fixed while $d$ and $l$ increase.
 >
 > > [!question]- Take GPT-2 XL and increase the context length to 16,384. How does the total FLOPs for one forward pass change? How does the relative contribution of FLOPs of the model components change?
 > >
