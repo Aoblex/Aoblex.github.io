@@ -89,7 +89,7 @@ def sample_next_token_with_temperature(logits: torch.Tensor, temperature: float)
 
 ### Sampling with top-$p$ (nucleus)
 
-Another trick is to truncate low-probability tokens:
+Top-$p$ sampling, also known as nucleus sampling, was introduced by [Holtzman et al. (2020)](https://arxiv.org/abs/1904.09751) in *The Curious Case of Neural Text Degeneration*. The main idea is to truncate low-probability tokens:
 
 $$
 P[n, i] = P_p(x_{n+1} = i \mid x_{1 \ldots n}) =
