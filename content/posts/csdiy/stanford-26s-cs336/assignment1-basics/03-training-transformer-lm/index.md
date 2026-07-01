@@ -660,6 +660,23 @@ def load_checkpoint(
     return checkpoint["iteration"]
 ```
 
+## Train
+
+Now we can finally put everything together. To make things organized, I use the following tools:
+- [hydra](https://hydra.cc/): manage training configurations;
+- [wandb](https://wandb.ai/site): manage training logs;
+
+In my implementation, the training system is roughly composed of the following parts:
+
+- **Configuration**: stores model, data, optimizer, and training hyperparameters.
+- **Model construction**: builds the Transformer LM from the selected configuration.
+- **Optimizer construction**: wraps model parameters with the chosen update rule.
+- **Data loading**: samples fixed-length token windows from the tokenized corpus.
+- **Training loop**: performs forward pass, loss computation, backward pass, gradient clipping, learning rate scheduling, and parameter updates.
+- **Evaluation**: periodically computes validation loss and perplexity.
+- **Logging**: records training progress so I can tell whether the run is healthy.
+- **Checkpointing**: saves enough state for later inspection or resuming.
+
 ---
 
 # Solutions
