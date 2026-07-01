@@ -54,7 +54,7 @@ def get_batch(
 
 # Checkpointing
 
-_Checkpointing_ allows us to resume a training run tht stopped midway through. To resume, we need to save model state, optimizer state, current iteration number and other necessary information.
+_Checkpointing_ allows us to resume a training run that stopped midway through. To resume, the essential state is still simple: model parameters, optimizer state, and the current iteration number. Extra metadata is not required for resuming, but it is useful when I later inspect a checkpoint and want to know when it was saved and how much training had already happened.
 
 ```python
 def save_checkpoint(
@@ -62,12 +62,15 @@ def save_checkpoint(
     optimizer: torch.optim.Optimizer,
     iteration: int,
     out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
+    metadata: dict | None = None,
 ) -> None:
     checkpoint = {
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "iteration": iteration,
     }
+    if metadata is not None:
+        checkpoint["metadata"] = metadata
     torch.save(checkpoint, out)
 
 
@@ -83,6 +86,8 @@ def load_checkpoint(
 
     return checkpoint["iteration"]
 ```
+
+For my training loop, the metadata contains fields such as `started_at`, `saved_at`, `elapsed_sec`, and `tokens_seen`. These fields do not change the training semantics, but they make checkpoints easier to reason about outside the training script.
 
 ---
 
@@ -123,6 +128,8 @@ The top-level `train/config.yaml` and `inference/config.yaml` files are only ent
 - `train/experiment`: complete training experiment presets;
 - `inference/run`: decoding parameters, prompt, and checkpoint path;
 - `inference/experiment`: inference presets.
+
+I also want experiment files to stay small. The default runtime settings are loaded by the entry points: `train/config.yaml` loads `/train/run@run: default`, and `inference/config.yaml` loads `/inference/run@run: default`. An experiment preset should mostly choose the model, dataset, tokenizer, and optimizer, then override only the few settings that make that run special.
 
 ## Instantiation
 
@@ -217,11 +224,25 @@ wandb.init(
 )
 ```
 
-During training, I record:
+During training, I keep three coordinates around:
 
-- training loss;
-- learning rate;
-- validation loss;
-- perplexity.
+- `step`;
+- `tokens_seen`;
+- `time/elapsed_sec`.
 
-With a wandb API, I can upload my logs to the cloud and save for later use, which is really convenient.
+I still use `step` as the default W&B step, because it is the most natural axis for debugging the optimizer. But `tokens_seen` and elapsed wall-clock time answer different questions. `tokens_seen` is better when comparing experiments with different batch sizes, gradient accumulation, or context lengths. `time/elapsed_sec` is better when comparing how quickly two runs reach the same loss or perplexity in real time.
+
+The main metrics I record are:
+
+- `train/loss`;
+- `train/lr`;
+- `eval/loss`;
+- `eval/perplexity`;
+- `eval/time_sec`;
+- `time/elapsed_sec`;
+- `time/step_sec`;
+- `time/tokens_per_sec`;
+- `checkpoint/time_sec`;
+- `tokens_seen`.
+
+This gives me both an optimization view and an efficiency view. Loss and perplexity show whether the model is improving; step time, throughput, and checkpoint/eval time show whether the training system itself is behaving as expected.
