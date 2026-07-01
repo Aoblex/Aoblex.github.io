@@ -88,34 +88,146 @@ def load_checkpoint(
 
 # Configuration
 
-There are too many hyperparameters to set in a training experiment, so I use [hydra](https://hydra.cc/) to manage these configurations.
-Here is a [basic tutorial](https://hydra.cc/docs/tutorials/basic/your_first_app/simple_cli/). Using this tool allows me to put different configuration sets in different yaml files and switch easily between them.
+There are too many choices in a training run to keep them as command-line flags: model size, dataset, tokenizer files, optimizer parameters, checkpoint paths, device selection, logging metadata, and so on. I use [Hydra](https://hydra.cc/) to keep these choices explicit and composable.
 
-My configuration structure is like this:
+## Structure
+
+My hydra configuration structure is roughly:
 
 ```sh
-.
-├── config.yaml
+configs
 ├── data
-├── experiment
+├── device
+├── inference
+│   ├── config.yaml
+│   ├── experiment
+│   └── run
 ├── model
 ├── optimizer
 ├── paths
-└── training
-
-6 directories, 1 file
+├── tokenizer
+└── train
+    ├── config.yaml
+    ├── experiment
+    └── run
 ```
 
-- config.yaml: the entrance configuration that orchestrates all components;
-- data: data path, vocabulary size, etc.;
-- experiment: configuration for different experiments, each file gives a complete set of training settings;
-- model: specifies how the model is instantiated;
-- optimizer: offers different optimizer choices;
-- paths: specifies input/output paths;
-- training: details for training, including batch size, gradient accumulation steps, log steps, etc.;
+The top-level `train/config.yaml` and `inference/config.yaml` files are only entry points. They choose defaults and define the Hydra output directory. The actual settings live in smaller config groups:
+
+- `data`: tokenized dataset paths and vocabulary size;
+- `tokenizer`: vocabulary file, merges file, special tokens, and EOS token;
+- `model`: Transformer size and the `_target_` used by Hydra to instantiate the model;
+- `optimizer`: optimizer constructor plus learning-rate schedule and gradient clipping settings;
+- `device`: the device policy, such as `auto`, `gpu`, `cpu`, etc.;
+- `train/run`: batch size, number of steps, validation frequency, checkpoint frequency, etc.;
+- `train/experiment`: complete training experiment presets;
+- `inference/run`: decoding parameters, prompt, and checkpoint path;
+- `inference/experiment`: inference presets.
+
+## Instantiation
+
+One useful change is that the model and optimizer are now instantiated from configuration. For example, a model config contains:
+
+```yaml
+_target_: cs336_basics.transformer.Transformer
+vocab_size: ${data.vocab_size}
+d_model: 512
+num_layers: 8
+d_ff: 2048
+num_heads: 8
+max_seq_len: 1024
+theta: 10000.0
+```
+
+The training script can then simply call:
+
+```python
+model = instantiate(cfg.model, device=device)
+```
+
+The optimizer is slightly different because `model.parameters()` is only available at runtime. I keep the optimizer constructor under `optimizer.init` and make it partial:
+
+```yaml
+init:
+  _target_: cs336_basics.optimizer.AdamW
+  _partial_: true
+  _convert_: all
+  lr: 0.001
+  betas: [0.9, 0.999]
+  eps: 1e-8
+  weight_decay: 0.1
+
+warmup_steps: 100
+cosine_steps: 10000
+min_lr: 1e-5
+max_grad_norm: 1.0
+```
+
+Then the script supplies parameters explicitly:
+
+```python
+optimizer = instantiate(cfg.optimizer.init)(params=model.parameters())
+```
+
+This removes the manual `if optimizer == "adamw"` dispatch from the training script. The config decides what object to build, and the script only wires runtime objects together.
+
+## Output
+
+I also organize outputs by experiment name first:
+
+```sh
+outputs
+└── tinystories-smoke
+    ├── train
+    │   ├── checkpoints
+    │   │   ├── latest.pt
+    │   │   └── step_10.pt
+    │   ├── console.log
+    │   └── .hydra
+    └── inference
+        └── .hydra
+```
+
+This makes `train` and `inference` parallel views of the same experiment. The tradeoff is that rerunning the same experiment name overwrites the current run. For this project, I prefer that behavior because `latest.pt` always points to the checkpoint I want to inspect or decode from. If I later want to keep every run, I can add a run id under `outputs/${name}/train`.
+
+For inference, the default checkpoint path is:
+
+```yaml
+checkpoint_path: ${paths.output_dir}/${name}/train/checkpoints/latest.pt
+```
+
+The inference script also tries to read the training run's `.hydra/config.yaml` next to the checkpoint. This is important because the checkpoint only makes sense with the model and tokenizer configuration used during training. If I train a small smoke model and then decode with a larger default model config, PyTorch will report shape mismatches when loading the state dict.
 
 ---
 
 # Logging
 
-I use [wandb](https://wandb.ai/site) for logging.
+I use [Weights & Biases](https://wandb.ai/site) to track training runs. The main reason is simple: once I start running multiple experiments, I need a place to compare their curves and recover the exact configuration that produced each result.
+
+I keep the basic W&B metadata in config:
+
+```yaml
+project: cs336-assignment1
+name: tinystories-small-adamw
+notes: "TinyStories, small model, AdamW optimizer"
+tags: []
+```
+
+These fields are passed to `wandb.init`, together with the resolved Hydra config:
+
+```python
+wandb.init(
+    project=cfg.project,
+    name=cfg.name,
+    notes=cfg.get("notes"),
+    tags=cfg.get("tags", []),
+    config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=False),
+)
+```
+
+During training, I record:
+
+- training loss;
+- learning rate;
+- validation loss;
+- perplexity.
