@@ -1,7 +1,7 @@
 +++
 title = 'Section 4: Training Loop'
 date = '2026-07-01T13:49:13+08:00'
-summary = 'Put things together and build a full training loop! 🤩'
+summary = 'Build the full training loop! 🤩'
 weight = 40
 draft = false
 +++
@@ -88,7 +88,7 @@ def load_checkpoint(
 
 # Configuration
 
-There are too many choices in a training run to keep them as command-line flags: model size, dataset, tokenizer files, optimizer parameters, checkpoint paths, device selection, logging metadata, and so on. I use [Hydra](https://hydra.cc/) to keep these choices explicit and composable.
+There are too many choices in a training run to keep them as command-line flags: model size, dataset, tokenizer files, optimizer parameters, checkpoint paths, device selection, logging metadata, and so on. So I use [Hydra](https://hydra.cc/) to keep these choices explicit and composable.
 
 ## Structure
 
@@ -126,7 +126,7 @@ The top-level `train/config.yaml` and `inference/config.yaml` files are only ent
 
 ## Instantiation
 
-One useful change is that the model and optimizer are now instantiated from configuration. For example, a model config contains:
+One useful feature of hydra is that the model and optimizer could be instantiated from configuration. For example, a model config contains:
 
 ```yaml
 _target_: cs336_basics.transformer.Transformer
@@ -142,7 +142,7 @@ theta: 10000.0
 The training script can then simply call:
 
 ```python
-model = instantiate(cfg.model, device=device)
+model = hydra.utils.instantiate(cfg.model, device=device)
 ```
 
 The optimizer is slightly different because `model.parameters()` is only available at runtime. I keep the optimizer constructor under `optimizer.init` and make it partial:
@@ -166,10 +166,10 @@ max_grad_norm: 1.0
 Then the script supplies parameters explicitly:
 
 ```python
-optimizer = instantiate(cfg.optimizer.init)(params=model.parameters())
+optimizer = hydra.utils.instantiate(cfg.optimizer.init)(params=model.parameters())
 ```
 
-This removes the manual `if optimizer == "adamw"` dispatch from the training script. The config decides what object to build, and the script only wires runtime objects together.
+This way, the config decides what object to build, and the script only wires runtime objects together.
 
 ## Output
 
@@ -188,15 +188,7 @@ outputs
         └── .hydra
 ```
 
-This makes `train` and `inference` parallel views of the same experiment. The tradeoff is that rerunning the same experiment name overwrites the current run. For this project, I prefer that behavior because `latest.pt` always points to the checkpoint I want to inspect or decode from. If I later want to keep every run, I can add a run id under `outputs/${name}/train`.
-
-For inference, the default checkpoint path is:
-
-```yaml
-checkpoint_path: ${paths.output_dir}/${name}/train/checkpoints/latest.pt
-```
-
-The inference script also tries to read the training run's `.hydra/config.yaml` next to the checkpoint. This is important because the checkpoint only makes sense with the model and tokenizer configuration used during training. If I train a small smoke model and then decode with a larger default model config, PyTorch will report shape mismatches when loading the state dict.
+This makes `train` and `inference` parallel views of the same experiment. The tradeoff is that rerunning the same experiment name overwrites the current run. For this project, I prefer that behavior because `latest.pt` always points to the checkpoint I want to inspect or decode from.
 
 ---
 
@@ -231,3 +223,5 @@ During training, I record:
 - learning rate;
 - validation loss;
 - perplexity.
+
+With a wandb API, I can upload my logs to the cloud and save for later use, which is really convenient.
