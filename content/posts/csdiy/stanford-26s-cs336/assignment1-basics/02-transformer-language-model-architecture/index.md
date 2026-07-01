@@ -337,10 +337,11 @@ class RoPE(nn.Module):
         seqlen, d_k = x.shape[-2], x.shape[-1]
         assert seqlen <= self.max_seq_len, f"Current seqlen={seqlen} > max_seq_len={self.max_seq_len}!"
         assert d_k == self.d_k, f"Input d_k={d_k} != RoPE d_k={self.d_k}"
-        assert torch.max(token_positions) < self.max_seq_len, "Token position exceeded."
-
-        # in case token_positions does not have the batch dimension
         assert token_positions.shape[-1] == seqlen
+        assert torch.all((0 <= token_positions) & (token_positions < self.max_seq_len)), "Token position out of range."
+        # Insert singleton head-like dims before seqlen so (batch, seqlen) broadcasts over attention heads.
+        while token_positions.ndim < x.ndim - 1:
+            token_positions = token_positions.unsqueeze(-2)
         token_positions = torch.broadcast_to(token_positions, x.shape[:-1])
 
         cos_freqs = einx.get_at("[position] half_dk, ... seqlen -> ... seqlen half_dk", self.cos, token_positions)
