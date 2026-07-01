@@ -6,15 +6,17 @@ weight = 30
 draft = false
 +++
 
-In this section, we will train the transformer model. The training process mainly consists of the following three components:
+The training process mainly consists of the following three components:
 
 - **Loss**: the objective function, usually cross-entropy.
 - **Optimizer**: the update rule used to minimize this loss, such as [AdamW](https://arxiv.org/abs/1711.05101). We will need a direction and a step size for each update.
 - **Training loop**: the infrastructure that loads data, saves checkpoints, and manages training.
 
+In this section, we focus on the first two components: loss and optimizer.
+
 ---
 
-# Loss: Cross-entropy Loss
+# Loss: Cross-Entropy Loss
 
 Recall that the Transformer model estimates **the distribution** of the next token given a context. Its final layer outputs a matrix $o \in \mathbb{R}^{m \times \text{vocab}}$, where the $i$-th row $o_i \in \mathbb{R}^{\text{vocab}}$ contains the next-token logits for the $i$-th input position.
 
@@ -586,96 +588,6 @@ def gradient_clipping(
     for p in params:
         p.grad.mul_(scaling)
 ```
-
----
-
-# Training Loop
-
-Before putting all these components together, we need to implement **data loader** and **checkpointing**.
-
-## Data Loader
-
-After tokenization, our input data is a single sequence of token IDs $x = (x_1, \ldots, x_n)$. During training, we repeatedly sample mini-batches of contiguous token sequences from this stream. This makes optimization computationally manageable, introduces useful stochasticity into gradient estimates, and allows efficient training even when the full dataset is too large to fit in memory.
-
-```python
-def get_batch(
-    x: Int[np.ndarray, "..."],
-    batch_size: int,
-    context_length: int,
-    device: torch.device | str,
-) -> tuple[
-    Int[torch.Tensor, "batch_size context_length"],
-    Int[torch.Tensor, "batch_size context_length"],
-]:
-    if x.ndim != 1:
-        raise ValueError("x must be a 1D array of token IDs.")
-    if batch_size <= 0 or context_length <= 0:
-        raise ValueError("batch_size and context_length must be positive.")
-    if len(x) <= context_length:
-        raise ValueError("x must contain more tokens than context_length.")
-
-    # Each start position must leave room for context_length inputs
-    # plus one next-token target.
-    starts = np.random.randint(0, len(x) - context_length, size=batch_size)
-    offsets = np.arange(context_length)
-
-    inputs = x[starts[:, None] + offsets[None, :]]
-    targets = x[starts[:, None] + offsets[None, :] + 1]
-
-    return (
-        torch.as_tensor(inputs, dtype=torch.long, device=device),
-        torch.as_tensor(targets, dtype=torch.long, device=device),
-    )
-```
-
-## Checkpointing
-
-_Checkpointing_ allows us to resume a training run tht stopped midway through. To resume, we need to save model state, optimizer state, current iteration number and other necessary information.
-
-```python
-def save_checkpoint(
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
-    iteration: int,
-    out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
-) -> None:
-    checkpoint = {
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "iteration": iteration,
-    }
-    torch.save(checkpoint, out)
-
-
-def load_checkpoint(
-    src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
-) -> int:
-    checkpoint = torch.load(src)
-
-    model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-
-    return checkpoint["iteration"]
-```
-
-## Train
-
-Now we can finally put everything together. To make things organized, I use the following tools:
-- [hydra](https://hydra.cc/): manage training configurations;
-- [wandb](https://wandb.ai/site): manage training logs;
-
-In my implementation, the training system is roughly composed of the following parts:
-
-- **Configuration**: stores model, data, optimizer, and training hyperparameters.
-- **Model construction**: builds the Transformer LM from the selected configuration.
-- **Optimizer construction**: wraps model parameters with the chosen update rule.
-- **Data loading**: samples fixed-length token windows from the tokenized corpus.
-- **Training loop**: performs forward pass, loss computation, backward pass, gradient clipping, learning rate scheduling, and parameter updates.
-- **Evaluation**: periodically computes validation loss and perplexity.
-- **Logging**: records training progress so I can tell whether the run is healthy.
-- **Checkpointing**: saves enough state for later inspection or resuming.
 
 ---
 
