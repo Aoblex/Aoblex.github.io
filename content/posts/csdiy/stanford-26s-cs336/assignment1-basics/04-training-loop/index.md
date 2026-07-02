@@ -133,16 +133,16 @@ I also want experiment files to stay small. The default runtime settings are loa
 
 ## Instantiation
 
-One useful feature of hydra is that the model and optimizer could be instantiated from configuration. For example, a model config contains:
+One useful feature of hydra is that the model and optimizer could be instantiated from configuration. For example, a base model config contains:
 
 ```yaml
 _target_: cs336_basics.transformer.Transformer
 vocab_size: ${data.vocab_size}
 d_model: 512
-num_layers: 8
-d_ff: 2048
-num_heads: 8
-max_seq_len: 1024
+num_layers: 4
+d_ff: 1344
+num_heads: 16
+max_seq_len: 256
 theta: 10000.0
 ```
 
@@ -207,8 +207,8 @@ I keep the basic W&B metadata in config:
 
 ```yaml
 project: cs336-assignment1
-name: tinystories-small-adamw
-notes: "TinyStories, small model, AdamW optimizer"
+name: tinystories-smoke
+notes: "TinyStories smoke test"
 tags: []
 ```
 
