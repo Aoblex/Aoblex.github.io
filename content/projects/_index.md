@@ -1,6 +1,6 @@
 +++
 title = "Projects"
-summary = "Things I learn by building. 🛠️"
+summary = "Hands-on experiments."
 +++
 
-Coursework, implementations, and other hands-on projects.
+A collection of things I learn by building.

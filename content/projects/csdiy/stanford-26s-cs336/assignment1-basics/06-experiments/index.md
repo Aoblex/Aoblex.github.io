@@ -1,7 +1,7 @@
 +++
 title = 'Section 6: Experiments'
 date = '2026-07-01T22:46:46+08:00'
-summary = 'Put everything together and train our own model! 🥳'
+summary = 'Put everything together and train our own model.'
 weight = 60
 draft = false
 +++

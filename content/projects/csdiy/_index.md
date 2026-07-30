@@ -1,7 +1,7 @@
 +++
 title = "CSDIY"
-summary = "Let's DIY! 🛠️"
+summary = "Building essential computer science skills from the ground up."
 date = "2025-04-21T21:10:30+08:00"
 +++
 
-A collection of notes, assignments, and blog posts for [CSDIY](https://csdiy.wiki).
+Notes and projects from [courses](https://csdiy.wiki) I’m working through.

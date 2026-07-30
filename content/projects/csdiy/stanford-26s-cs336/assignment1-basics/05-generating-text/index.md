@@ -1,7 +1,7 @@
 +++
 title = 'Section 5: Generating Text'
 date = '2026-07-01T14:51:15+08:00'
-summary = 'Generate text from our model! 🤬'
+summary = 'Generate text from our model.'
 weight = 50
 draft = false
 +++

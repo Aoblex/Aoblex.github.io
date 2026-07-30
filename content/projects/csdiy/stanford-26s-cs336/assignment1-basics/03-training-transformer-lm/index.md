@@ -1,7 +1,7 @@
 +++
 title = 'Section 3: Training a Transformer LM'
 date = '2026-05-09T21:27:10+08:00'
-summary = 'Build the components we need to support training! 😌'
+summary = 'Build the components needed to train a Transformer language model.'
 weight = 30
 draft = false
 +++

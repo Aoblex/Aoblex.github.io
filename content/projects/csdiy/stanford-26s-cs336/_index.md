@@ -1,6 +1,6 @@
 +++
 title = "CS336: Language Modeling from Scratch (Spring 2026)"
-summary = "Really hard, but worth it."
+summary = "Build a language model from scratch."
 date = "2026-01-09T20:45:51+08:00"
 +++
 
