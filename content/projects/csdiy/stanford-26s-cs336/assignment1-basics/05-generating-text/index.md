@@ -10,8 +10,8 @@ First of all, let's make the notations clear:
 
 - $n$: sequence length;
 - $v$: the vocabulary size;
-- $\mathbb{V} = \\{0, 1, 2, \ldots, v-1 \\}$: the set of token IDs;
-- $\Delta^v = \\{ (x_0, x_1, \ldots, x_{v-1}) \in \mathbb{R}^v | x_i \geq 0, \sum x_i = 1 \\}$: probability simplex;
+- $\mathbb{V} = \{0, 1, 2, \ldots, v-1\}$: the set of token IDs;
+- $\Delta^v = \{(x_0, x_1, \ldots, x_{v-1}) \in \mathbb{R}^v \mid x_i \geq 0, \sum x_i = 1\}$: probability simplex;
 - $X \in \mathbb{V}^{n}$: input token IDs;
 - $O \in \mathbb{R}^{n \times v}$: output logits;
 - $P \in (\Delta^v)^{n}$: output probabilities;

@@ -20,7 +20,7 @@ In this section, we focus on the first two components: loss and optimizer.
 
 Recall that the Transformer model estimates **the distribution** of the next token given a context. Its final layer outputs a matrix $o \in \mathbb{R}^{m \times \text{vocab}}$, where the $i$-th row $o_i \in \mathbb{R}^{\text{vocab}}$ contains the next-token logits for the $i$-th input position.
 
-Given a training dataset $\mathcal{D} = \\{ x \mid x \in \\{1, 2, \ldots, \text{vocab}\\}^{m+1} \\}$, where each $x$ is a length-$m+1$ token sequence, the cross-entropy loss is defined as:
+Given a training dataset $\mathcal{D} = \{x \mid x \in \{1, 2, \ldots, \text{vocab}\}^{m+1}\}$, where each $x$ is a length-$m+1$ token sequence, the cross-entropy loss is defined as:
 
 $$
 \begin{align*}
@@ -557,7 +557,7 @@ Below is an example cosine learning rate schedule:
 
 ## Gradient Clipping
 
-_Gradient clipping_ is a trick to stabilize training. We do it by scaling the gradient $g$ (for all parameters) by a factor to make sure $\\|g\\|_2 \leq M$, where $M$ is a given constant. It can be expressed as:
+_Gradient clipping_ is a trick to stabilize training. We do it by scaling the gradient $g$ (for all parameters) by a factor to make sure $\lVert g \rVert_2 \leq M$, where $M$ is a given constant. It can be expressed as:
 
 $$
 \hat{g} \leftarrow
@@ -784,7 +784,7 @@ $$
 > >
 > >     so in total it's $4mnp$ FLOPs, which is $2\times$ the forward FLOPs.
 > >
-> > - Optimizer state: In AdamW, for each parameter at each step, we need to compute $m$, $v$ and update the parameter $\theta$. So the total FLOPs for this update is $C \times \\#\text{parameters}$, where $C$ is some constant corresponding to the FLOPs of 1 parameter at 1 step. I think this constant is around $20$.
+> > - Optimizer state: In AdamW, for each parameter at each step, we need to compute $m$, $v$ and update the parameter $\theta$. So the total FLOPs for this update is $C \times \#\text{parameters}$, where $C$ is some constant corresponding to the FLOPs of 1 parameter at 1 step. I think this constant is around $20$.
 > >
 > > Add these up, we get:
 > >
