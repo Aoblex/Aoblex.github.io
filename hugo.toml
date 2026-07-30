@@ -55,8 +55,8 @@ name = "Search"
 url = "/search"
 
 [params.homeInfoParams]
-Title = "Hi there! 👋"
-Content = "Notes and projects about things I'm learning."
+Title = "Hi, I'm Chenrui Wang 🤓"
+Content = "I received my B.S. in [Statistics](https://ssds.sufe.edu.cn/) from [Shanghai University of Finance and Economics](https://www.sufe.edu.cn/), where I was supervised by [Prof. Yixuan Qiu](https://statr.me/). I am currently pursuing an M.S. in [Applied Statistics](http://stat.ruc.edu.cn/) at [Renmin University of China](http://www.ruc.edu.cn/), supervised by [Prof. Xiaoling Lv](http://stat.ruc.edu.cn/jszy/lxl/index.html). My research interests lie at the intersection of optimization and efficient computation."
 
 [menus]
 # Hugo menus: https://gohugo.io/configuration/menus/
