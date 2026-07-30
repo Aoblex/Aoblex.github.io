@@ -92,6 +92,16 @@ Here are my solutions to the problems given in the writeup.
 > > uv run python scripts/plot_metrics.py run-a run-b
 > > ```
 > >
+> > The quantitative experiment table is also regenerated after each completed run. It can be rebuilt
+> > at any time by scanning the local Hydra configurations and JSONL metrics:
+> >
+> > ```bash
+> > make experiment-log
+> > ```
+> >
+> > The generated Markdown is written to `outputs/experiment-log.md`. I keep qualitative decisions and
+> > interpretations in this document rather than attempting to infer them from metrics.
+> >
 > > I also save checkpoint metadata including timing information and the training and validation RNG states.
 > > This keeps resumed training, validation sampling, and elapsed time consistent with an uninterrupted run.
 > >
