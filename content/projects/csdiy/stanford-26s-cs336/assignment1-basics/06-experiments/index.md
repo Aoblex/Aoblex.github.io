@@ -29,8 +29,8 @@ Here are my solutions to the problems given in the writeup.
 > > **Logging infrastructure code**
 > >
 > > I use Hydra for reproducible configuration and a local JSONL file for experiment tracking. Each
-> > experiment name maps to a fixed output directory containing the resolved Hydra configuration,
-> > checkpoints, and `metrics.jsonl`. This keeps experiment records local and makes
+> > experiment name maps to a fixed output root containing the resolved Hydra configuration,
+> > checkpoints, `metrics.jsonl`, and derived plots. This keeps experiment records local and makes
 > > checkpoint recovery independent of the logging system.
 > >
 > > ```python
@@ -84,13 +84,12 @@ Here are my solutions to the problems given in the writeup.
 > > steps clipped since the previous training log, which is more informative than a single Boolean value.
 > >
 > > A local plotting script compares one or more runs and produces loss curves against optimizer steps and
-> > wall-clock time, together with gradient norm and clipping diagnostics:
+> > wall-clock time, together with gradient norm and clipping diagnostics. Each completed training run
+> > automatically writes its own plot to `outputs/<name>/plots/metrics.svg`; comparisons only need the run
+> > names:
 > >
 > > ```bash
-> > uv run python scripts/plot_metrics.py \
-> >   outputs/run-a/train/metrics.jsonl \
-> >   outputs/run-b/train/metrics.jsonl \
-> >   --output outputs/plots/loss-curves.svg
+> > uv run python scripts/plot_metrics.py run-a run-b
 > > ```
 > >
 > > I also save checkpoint metadata including timing information and the training and validation RNG states.
