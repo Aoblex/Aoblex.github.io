@@ -28,80 +28,38 @@ Here are my solutions to the problems given in the writeup.
 > >
 > > **Logging infrastructure code**
 > >
-> > I use Hydra for reproducible configuration and W&B for experiment tracking. The core structure is:
+> > I use Hydra for reproducible configuration and a local JSONL file for experiment tracking. Each
+> > experiment name maps to a fixed output directory containing the resolved Hydra configuration,
+> > checkpoints, and `metrics.jsonl`. This keeps experiment records local and makes
+> > checkpoint recovery independent of the logging system.
 > >
 > > ```python
-> > # scripts/train.py
-> > wandb.init(
-> >     project=cfg.project,
-> >     name=cfg.name,
-> >     notes=cfg.get("notes"),
-> >     tags=cfg.get("tags", []),
-> >     config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=False),
-> > )
-> >
 > > # cs336_basics/train.py
-> > run_started_at = now_iso()
-> > timer = Timer(device)
-> > tokens_per_step = batch_size * gradient_accumulation_steps * max_seq_len
+> > def _log_metrics(metrics, metrics_log_path):
+> >     with open(metrics_log_path, "a", encoding="utf-8") as f:
+> >         f.write(json.dumps(dict(metrics), sort_keys=True) + "\n")
 > >
-> > for step in range(1, total_steps + 1):
-> >     step_start = timer.measure_start()
-> >     loss = train_one_optimizer_step()
-> >     step_sec = timer.measure_end(step_start)
-> >
-> >     tokens_seen = step * tokens_per_step
-> >     elapsed_sec = timer.elapsed_sec()
-> >
-> >     if should_eval(step):
-> >         eval_start = timer.measure_start()
-> >         val_loss = compute_validation_loss(...)
-> >         eval_sec = timer.measure_end(eval_start)
-> >
-> >         wandb.log(
-> >             {
-> >                 "step": step,
-> >                 "tokens_seen": tokens_seen,
-> >                 "time/elapsed_sec": timer.elapsed_sec(),
-> >                 "eval/loss": val_loss,
-> >                 "eval/perplexity": math.exp(val_loss),
-> >                 "eval/time_sec": eval_sec,
-> >             },
-> >             step=step,
-> >         )
-> >
-> >     if should_log(step):
-> >         wandb.log(
-> >             {
-> >                 "step": step,
-> >                 "tokens_seen": tokens_seen,
-> >                 "time/elapsed_sec": elapsed_sec,
-> >                 "time/step_sec": recent_train_sec / recent_steps,
-> >                 "time/tokens_per_sec": recent_tokens / recent_train_sec,
-> >                 "train/loss": loss,
-> >                 "train/lr": current_lr,
-> >             },
-> >             step=step,
-> >         )
-> >
-> >     if should_checkpoint(step):
-> >         save_checkpoint(
-> >             model,
-> >             optimizer,
-> >             step,
-> >             checkpoint_path,
-> >             metadata={
-> >                 "started_at": run_started_at,
-> >                 "saved_at": now_iso(),
-> >                 "elapsed_sec": timer.elapsed_sec(),
-> >                 "tokens_seen": tokens_seen,
-> >             },
-> >         )
+> > loss, grad_norm, grad_clipped = train_step(...)
+> > _log_metrics(
+> >     {
+> >         "event": "train",
+> >         "step": step,
+> >         "tokens_seen": tokens_seen,
+> >         "time/elapsed_sec": elapsed_sec,
+> >         "time/step_sec": recent_train_sec / recent_steps,
+> >         "time/tokens_per_sec": recent_tokens / recent_train_sec,
+> >         "train/loss": loss,
+> >         "train/lr": current_lr,
+> >         "train/grad_norm": grad_norm,
+> >         "train/grad_clip_fraction": recent_clipped_steps / recent_steps,
+> >     },
+> >     metrics_log_path,
+> > )
 > > ```
 > >
 > > The most important design choice is to keep several progress axes:
 > >
-> > - `step`: the optimizer step, used as the default W&B step;
+> > - `step`: the optimizer step;
 > > - `tokens_seen`: the total number of tokens processed so far;
 > > - `time/elapsed_sec`: wall-clock time since the beginning of training.
 > >
@@ -111,6 +69,8 @@ Here are my solutions to the problems given in the writeup.
 > >
 > > - `train/loss`;
 > > - `train/lr`;
+> > - `train/grad_norm`;
+> > - `train/grad_clip_fraction`;
 > > - `eval/loss`;
 > > - `eval/perplexity`;
 > > - `eval/time_sec`;
@@ -120,7 +80,21 @@ Here are my solutions to the problems given in the writeup.
 > > - `checkpoint/time_sec`;
 > > - `tokens_seen`.
 > >
-> > I also save timing metadata in checkpoints, including `started_at`, `saved_at`, `elapsed_sec`, and `tokens_seen`. This does not affect resuming training, but it makes the checkpoint easier to inspect later.
+> > The gradient norm is measured before clipping. The clipping fraction reports the fraction of optimizer
+> > steps clipped since the previous training log, which is more informative than a single Boolean value.
+> >
+> > A local plotting script compares one or more runs and produces loss curves against optimizer steps and
+> > wall-clock time, together with gradient norm and clipping diagnostics:
+> >
+> > ```bash
+> > uv run python scripts/plot_metrics.py \
+> >   outputs/run-a/train/metrics.jsonl \
+> >   outputs/run-b/train/metrics.jsonl \
+> >   --output outputs/plots/loss-curves.svg
+> > ```
+> >
+> > I also save checkpoint metadata including timing information and the training and validation RNG states.
+> > This keeps resumed training, validation sampling, and elapsed time consistent with an uninterrupted run.
 > >
 > > **Experiment log**
 > >
