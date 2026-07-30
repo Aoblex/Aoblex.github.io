@@ -20,7 +20,7 @@ inline = [['\(', '\)']]
 
 [params]
 math = true
-mainSections = ["posts"]
+mainSections = ["notes", "projects"]
 # https://adityatelange.github.io/hugo-PaperMod/posts/papermod/papermod-features
 ShowReadingTime = true
 ShowPostNavLinks = true
@@ -30,7 +30,7 @@ ShowShareButtons = false
 ShowToc = true
 
 [params.profileMode]
-enabled = true
+enabled = false
 title = "trytry's home"
 subtitle = "Hi there!"
 imageUrl = "images/profile.jpg"
@@ -39,8 +39,12 @@ imageWidth = 150
 imageHeight = 150
 
 [[params.profileMode.buttons]]
-name = "Posts"
-url = "/posts"
+name = "Notes"
+url = "/notes"
+
+[[params.profileMode.buttons]]
+name = "Projects"
+url = "/projects"
 
 [[params.profileMode.buttons]]
 name = "Archives"
@@ -50,25 +54,34 @@ url = "/archives"
 name = "Search"
 url = "/search"
 
+[params.homeInfoParams]
+Title = "Hi there! 👋"
+Content = "Notes and projects about things I'm learning."
+
 [menus]
 # Hugo menus: https://gohugo.io/configuration/menus/
 
 [[menus.main]]
-name = "Posts"
-pageRef = "/posts"
+name = "Notes"
+pageRef = "/notes"
 weight = 10
+
+[[menus.main]]
+name = "Projects"
+pageRef = "/projects"
+weight = 20
 
 [[menus.main]]
 name = "Archives"
 pageRef = "/archives"
-weight = 20
+weight = 30
 
 [[menus.main]]
 name = "Search"
 pageRef = "/search"
-weight = 30
+weight = 40
 
 [[menus.main]]
 name = "About"
 pageRef = "/about"
-weight = 40
+weight = 50

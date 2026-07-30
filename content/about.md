@@ -4,4 +4,4 @@ url = "/about/"
 summary = "About this site"
 +++
 
-This is my personal site for notes, course writeups, and blog posts.
+This is my personal site for notes and projects.
