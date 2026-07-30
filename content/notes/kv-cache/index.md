@@ -1,7 +1,7 @@
 +++
 title = 'Understanding the KV Cache'
 date = '2026-07-23T22:01:12+08:00'
-summary = 'A derivation of key-value caching from causal self-attention, with explicit assumptions, correctness arguments, and complexity analysis.'
+summary = 'A derivation of key-value caching from causal self-attention.'
 draft = false
 +++
 
@@ -97,9 +97,7 @@ The sequence grows by one token per step until a stopping criterion is met. This
 > [!tip] The Prefill Phase
 > In actual inference, we begin at $t = 0$:
 >
-> $$
-> \mathbf{Y}_0 \in \mathcal{V}^{N_0} \xrightarrow{\text{model}} y_{1}.
-> $$
+> $$\mathbf{Y}_0 \in \mathcal{V}^{N_0} \xrightarrow{\text{model}} y_{1}.$$
 >
 > This first full-sequence evaluation is the **prefill phase**. It produces the first generated token and, in a cached implementation, initializes the per-layer key and value states used by subsequent decoding steps.
 
@@ -110,20 +108,11 @@ The key fact required by KV caching is a direct consequence of causal masking ra
 > [!info] Proposition
 > For every decoding step $t \geq 0$ and every layer $\ell \in \{0, 1, \ldots, L\}$, appending $y_{t+1}$ leaves the hidden states of the existing $N_t$ positions unchanged:
 >
-> $$
-> \mathbf{X}_{t+1,\,1:N_t}^{(\ell)} =
-> \mathbf{X}_{t}^{(\ell)}.
-> $$
+> $$\mathbf{X}_{t+1,\,1:N_t}^{(\ell)} = \mathbf{X}_{t}^{(\ell)}.$$
 >
 > Equivalently,
 >
-> $$
-> \mathbf{X}_{t+1}^{(\ell)} =
-> \begin{bmatrix}
-> \mathbf{X}_{t}^{(\ell)} \\
-> \mathbf{x}_{t+1}^{(\ell)}
-> \end{bmatrix}.
-> $$
+> $$\mathbf{X}_{t+1}^{(\ell)} = \begin{bmatrix} \mathbf{X}_{t}^{(\ell)} \\ \mathbf{x}_{t+1}^{(\ell)} \end{bmatrix}.$$
 
 The proposition is proved by induction over the layer index:
 
