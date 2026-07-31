@@ -32,6 +32,8 @@ Here are my solutions to the problems given in the writeup.
 > > experiment name maps to a fixed output root containing the resolved Hydra configuration,
 > > checkpoints, `metrics.jsonl`, and derived plots. This keeps experiment records local and makes
 > > checkpoint recovery independent of the logging system.
+> > Single runs and sweep jobs share the same per-run layout; Hydra's sweep-level `multirun.yaml`
+> > is kept separately under `outputs/.hydra/sweeps/<sweep-name>/`.
 > >
 > > ```python
 > > # cs336_basics/train.py
