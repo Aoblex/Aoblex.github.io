@@ -10,7 +10,7 @@ Now it is time to put everything together and train (small) language models on a
 
 ---
 
-# Tinystories
+# TinyStories
 
 
 
