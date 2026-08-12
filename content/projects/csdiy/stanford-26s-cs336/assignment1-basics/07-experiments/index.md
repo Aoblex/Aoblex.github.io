@@ -6,13 +6,29 @@ weight = 70
 draft = false
 +++
 
-Now it is time to put everything together and train (small) language models on a pretraining dataset.
+Now it is time to put everything together and train our own language models. We will first experiment on TinyStories, then move to OpenWebText and a final time-constrained training run.
+
+---
+
+# Model Configuration
+
+The TinyStories experiments and OpenWebText baseline use the following Transformer architecture:
+
+- 4 Transformer blocks;
+- model dimension $d_{\text{model}}=512$;
+- 16 attention heads;
+- SwiGLU feed-forward networks with $d_{\text{ff}}=1344$;
+- pre-norm RMSNorm;
+- RoPE with $\Theta=10{,}000$;
+- maximum sequence length of 256 tokens.
 
 ---
 
 # TinyStories
 
+---
 
+# OpenWebText
 
 ---
 
