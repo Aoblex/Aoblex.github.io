@@ -1,8 +1,8 @@
 +++
-title = 'Section 4: Training Loop'
+title = 'Section 5: Training Loop'
 date = '2026-07-01T13:49:13+08:00'
 summary = 'Build the full training loop.'
-weight = 40
+weight = 50
 draft = false
 +++
 

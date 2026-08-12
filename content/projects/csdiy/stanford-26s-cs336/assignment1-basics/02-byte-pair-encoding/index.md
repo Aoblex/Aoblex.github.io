@@ -1,8 +1,8 @@
 +++
-title = 'Section 1: Byte Pair Encoding'
+title = 'Section 2: Byte Pair Encoding'
 date = '2026-04-16T20:31:41+08:00'
 summary = 'Train a BPE tokenizer from scratch.'
-weight = 10
+weight = 20
 draft = false
 +++
 

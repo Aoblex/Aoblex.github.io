@@ -1,14 +1,14 @@
 +++
-title = 'Section 2: Transformer Language Model Architecture'
+title = 'Section 3: Transformer Language Model Architecture'
 date = '2026-04-28T23:49:45+08:00'
 summary = 'Build a Transformer model from scratch.'
-weight = 20
+weight = 30
 draft = false
 +++
 
 # Introduction
 
-In [the last section](../byte-pair-encoding/), we built a BPE tokenizer from scratch, so we can convert raw texts into token IDs that a language model can understand.
+In [the last section](../02-byte-pair-encoding/), we built a BPE tokenizer from scratch, so we can convert raw texts into token IDs that a language model can understand.
 
 $$
 \text{text: (batch,)} \xrightarrow{\text{BPE}} \text{input: (batch, seqlen)}

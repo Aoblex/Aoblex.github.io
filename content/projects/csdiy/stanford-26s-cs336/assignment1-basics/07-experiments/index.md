@@ -1,8 +1,8 @@
 +++
-title = 'Section 6: Experiments'
+title = 'Section 7: Experiments'
 date = '2026-07-01T22:46:46+08:00'
 summary = 'Put everything together and train our own model.'
-weight = 60
+weight = 70
 draft = false
 +++
 

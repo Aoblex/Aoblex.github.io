@@ -1,8 +1,8 @@
 +++
-title = 'Section 3: Training a Transformer LM'
+title = 'Section 4: Training a Transformer LM'
 date = '2026-05-09T21:27:10+08:00'
 summary = 'Build the components needed to train a Transformer language model.'
-weight = 30
+weight = 40
 draft = false
 +++
 
@@ -765,7 +765,7 @@ $$
 >
 > >[!question]- How many FLOPs does running one step of AdamW take?
 > > **Answer**: Total FLOPs consists of three parts: forward, backward, optimizer step.
-> > - Forward: In [last section](../transformer-language-model-architecture/#compute), we computed the total FLOPs for 1 forward pass:
+> > - Forward: In [last section](../03-transformer-language-model-architecture/#compute), we computed the total FLOPs for 1 forward pass:
 > > $$
 \begin{align*}
 \text{forward FLOPs} &= b\left[l(8nd^2 + 4n^2d + 6ndd_{\text{ff}}) + 2ndv \right] \\
