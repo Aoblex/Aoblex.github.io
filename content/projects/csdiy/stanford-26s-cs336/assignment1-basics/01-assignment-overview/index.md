@@ -29,18 +29,3 @@ The assignment uses two datasets with different purposes:
 
 - **TinyStories** is small and structurally simple enough for rapid iteration. We train a tokenizer, encode the corpus, tune optimization settings, compare architectural choices, and generate short stories.
 - **OpenWebText** is broader and noisier. It provides a more realistic pretraining task and is used for the final time-constrained training run.
-
-After the implementation is complete, [Generating Text](../06-generating-text/) closes the loop by decoding model predictions back into text. [Experiments](../07-experiments/) then compare learning rates, batch sizes, and architectural components under controlled training budgets.
-
----
-
-# Guiding Principle
-
-The point of this assignment is not merely to obtain a low validation loss. A successful implementation should also make each transition understandable:
-
-- how bytes become tokens;
-- how tokens interact through attention;
-- how gradients update parameters;
-- how those choices appear in learning curves and generated samples;
-
-The later experiments are meaningful only because the underlying system is transparent enough to diagnose.
