@@ -1,847 +1,365 @@
 +++
 title = 'Section 4: Training a Transformer LM'
 date = '2026-05-09T21:27:10+08:00'
-summary = 'Build the components needed to train a Transformer language model.'
+summary = 'Define the objective and optimization mechanisms used to train a Transformer language model.'
 weight = 40
 draft = false
 +++
 
-The training process mainly consists of the following three components:
+# Introduction
 
-- **Loss**: the objective function, usually cross-entropy.
-- **Optimizer**: the update rule used to minimize this loss, such as [AdamW](https://arxiv.org/abs/1711.05101). We will need a direction and a step size for each update.
-- **Training loop**: the infrastructure that loads data, saves checkpoints, and manages training.
+Training turns next-token prediction into parameter updates. The model produces logits, cross-entropy measures how well they predict the following tokens, and AdamW uses the resulting gradients to update the model. A learning-rate schedule controls the update scale over time, while gradient clipping limits occasional unstable steps.
 
-In this section, we focus on the first two components: loss and optimizer.
+This section develops those components and accounts for the memory and computation required by one training step.
 
 ---
 
-# Loss: Cross-Entropy Loss
+# Cross-Entropy Loss
 
-Recall that the Transformer model estimates **the distribution** of the next token given a context. Its final layer outputs a matrix $o \in \mathbb{R}^{m \times \text{vocab}}$, where the $i$-th row $o_i \in \mathbb{R}^{\text{vocab}}$ contains the next-token logits for the $i$-th input position.
-
-Given a training dataset $\mathcal{D} = \{x \mid x \in \{1, 2, \ldots, \text{vocab}\}^{m+1}\}$, where each $x$ is a length-$m+1$ token sequence, the cross-entropy loss is defined as:
+For a sequence $x_1,\ldots,x_{m+1}$, the model produces logits $o_i\in\mathbb{R}^{v}$ at each position $i$. The probability assigned to the next token is
 
 $$
-\begin{align*}
-\ell(\theta; \mathcal{D})
-&= \frac{1}{|\mathcal{D}|} \sum_{x \in \mathcal{D}} \left[\frac{1}{m} \sum_{i=1}^{m} - \log p_{\theta}(x_{i+1} \mid x_{1:i}) \right] \\
-p_{\theta}(x_{i+1} \mid x_{1:i}) &= \operatorname{softmax}(o_i)[x_{i+1}] = \frac{\exp(o_i[x_{i+1}])}{\sum_{j=1}^{\text{vocab}} \exp(o_i[j])}
-\end{align*}
+p_\theta(x_{i+1}\mid x_{1:i})=\operatorname{softmax}(o_i)_{x_{i+1}}.
 $$
 
-where $o_i \in \mathbb{R}^{\text{vocab}}$ is the $i$-th row of the Transformer output logits.
+Training minimizes the average negative log-likelihood over tokens and examples:
 
-```python
-def cross_entropy(
-    logits: Float[torch.Tensor, "... seqlen vocab"],
-    targets: Int[torch.Tensor, "... seqlen"],
-) -> torch.Tensor:
-    logits_max = einx.max("... seqlen [vocab]", logits)
-    logits = einx.subtract("... seqlen vocab, ... seqlen -> ... seqlen vocab", logits, logits_max)
-    lse = einx.logsumexp("... seqlen [vocab]", logits)
-    o = einx.get_at("... seqlen [vocab], ... seqlen -> ... seqlen", logits, targets)
-    loss_items = einx.subtract("... seqlen , ... seqlen", lse, o)
-    return einx.mean("[... seqlen]", loss_items)
-```
+$$
+\ell(\theta;\mathcal D)=-\frac{1}{|\mathcal D|m}
+\sum_{x\in\mathcal D}\sum_{i=1}^{m}
+\log p_\theta(x_{i+1}\mid x_{1:i}).
+$$
+
+For a single logit vector $o$ and target $y$, the same loss can be written without explicitly forming probabilities:
+
+$$
+\ell(o,y)=\log\sum_{j=1}^{v}\exp(o_j)-o_y.
+$$
+
+Subtracting $c=\max_j o_j$ from every logit gives the numerically stable form
+
+$$
+\ell(o,y)=\log\sum_{j=1}^{v}\exp(o_j-c)-(o_y-c).
+$$
+
+The shift changes neither the softmax distribution nor the loss, but prevents large logits from overflowing during exponentiation.
 
 > [!note]- Cross-entropy and KL divergence
-> More formally, cross-entropy is defined for two probability distributions $p$ and $q$:
-> $$
-H(p, q) = \mathbb{E}_{x \sim p}\left[ -\log q(x) \right] = H(p) + D_{\text{KL}}(p \| q)
-$$
-> where
-> $$
-\begin{align*}
-H(p) &= \mathbb{E}_{x \sim p} \left[- \log p(x)\right] \\
-D_{\text{KL}}(p \| q) &= \mathbb{E}_{x \sim p} \left[\log \frac{p(x)}{q(x)}\right] \\
-\end{align*}
-$$
-> The given definition $\ell(\theta; \mathcal{D})$ is an empirical version of $H(p, q)$, where $p$ is the true distribution of tokens and $q$ is the predicted distribution.
->
-> Therefore, minimizing $\ell$ is equivalent to minimizing $D_{\text{KL}}$, since $H(p)$ is fixed with respect to the model parameters.
+> Cross-entropy decomposes as $H(p,q)=H(p)+D_{\mathrm{KL}}(p\|q)$. The data distribution $p$ is fixed during training, so minimizing cross-entropy with respect to the model distribution $q$ is equivalent to minimizing $D_{\mathrm{KL}}(p\|q)$.
 
 > [!note]- Perplexity
-> For a sequence of length $m$, the perplexity is defined as:
-> $$
-\text{perplexity} = \exp \left\{ \frac{1}{m} \sum_{i=1}^{m} \ell_i \right\}
-= \exp \left\{ -\frac{1}{m} \sum_{i=1}^{m} \log p_{\theta}(x_{i+1} \mid x_{1:i}) \right\}
-$$
->
-> Intuitively, perplexity can be interpreted as the **effective branching factor** — the average number of tokens the model considers equally likely at each step. A perfect model achieves perplexity $1$, while uniform guessing over a vocabulary of size $V$ yields perplexity $V$.
+> If the mean token-level cross-entropy is $\bar\ell$, then $\operatorname{PPL}=\exp(\bar\ell)$. Perplexity is the effective number of equally plausible next-token choices under the model. It equals $1$ for perfect prediction and $v$ for a uniform distribution over a vocabulary of size $v$.
 
 ---
 
-# Optimizers
+# Optimization
 
-Here we will build our own optimizers, which could be generally described as:
-
-$$
-\theta_{t+1} \leftarrow \theta_t - \alpha_t g_t,
-$$
-
-where $\alpha_t$ and $g_t$ are step size and search direction respectively. They are usually a function of timestamp $t$ and gradient $\nabla \ell(\theta_t)$.
-
-In practice, we inherit from [`torch.optim.Optimizer`](https://docs.pytorch.org/docs/2.12/optim.html#base-class) to define our own optimizer. There are at least two methods for us to implement:
-
-- `__init__(self, params, ...)`: stores `params` that will be optimized. You can also take additional arguments depending on the optimizer (_e.g._, learning rate).
-- `step(self)`: make one update of the parameters. It will be called after the backward pass, so you can use $\nabla \ell(\theta_t)$ and other state information to compute the search direction $g_t$ and step size $\alpha_t$, then updates parameters in-place: $\theta_t \leftarrow \theta_{t-1} - \alpha_t g_t$. Usually we decorate it with `@torch.no_grad()` to disable autograd in `step`.
-
-> [!note]- A note on the learning rate
-> For simplicity, all of the formulas and implementations below use a constant learning rate $\eta$. In practice, one typically uses a time-dependent schedule $\eta_t$ (e.g., linear warmup followed by cosine decay). Replacing $\eta$ with $\eta_t$ is straightforward and does not change the core logic of any optimizer described here.
-
----
-
-## SGD: Stochastic Gradient Descent
-
-The writeup implemented a slight variation of SGD to make the example richer:
+An optimizer converts the gradient on a sampled batch $B_t$ into a parameter update. The basic form is
 
 $$
-\theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{t+1}} \nabla L(\theta_t; B_t)
+\theta_{t+1}=\theta_t-\alpha_t u_t,
 $$
 
-```python
-class SGD(torch.optim.Optimizer):
-    def __init__(self, params, lr=1e-3):
-        if lr < 0:
-            raise ValueError(f"Invalid learning rate: {lr}")
-        defaults = {"lr": lr}
-        super().__init__(params, defaults)
+where $u_t$ is the update direction and $\alpha_t$ controls its scale.
 
-    @torch.no_grad()
-    def step(self, closure: Callable | None = None) -> None:
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
+## Stochastic Gradient Descent
 
-        for group in self.param_groups:
-            lr = group["lr"]
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-
-                # get state and grad
-                state = self.state[p]
-                t = state.get("t", 0)
-                grad = p.grad
-
-                # update parameters
-                p.add_(grad, alpha=-lr / math.sqrt(t + 1))
-
-                # update state
-                state["t"] = t + 1
-
-        return loss
-
-```
-
-### SGD with Momentum
-
-SGD with momentum smooths the update direction by accumulating an exponential moving average of past gradients, which dampens oscillations and accelerates progress along consistent descent directions.
+SGD uses the current batch gradient directly. The assignment's example additionally decays the step size as $1/\sqrt{t+1}$:
 
 $$
-\begin{align*}
-v_t &= \mu v_{t-1} + g_t \\[4pt]
-\theta_{t+1} &= \theta_t - \eta \, v_t
-\end{align*}
+g_t=\nabla_\theta\ell(\theta_t;B_t),
+\qquad
+\theta_{t+1}=\theta_t-\frac{\alpha}{\sqrt{t+1}}g_t.
 $$
 
-where $g_t = \nabla \ell(\theta_t)$, $v_0 = 0$, and $\mu \in [0, 1)$ (typically $0.9$) controls how much of the previous velocity is retained.
+The learning rate determines how far the optimizer moves along the gradient direction. A small value makes reliable but slow progress; a larger value can converge faster until the update begins to overshoot and destabilize optimization.
 
-> [!example]- Use cases
-> While SGD is rarely used for modern LLM training, it was the workhorse behind many foundational deep learning models, especially in computer vision.
->
-> - [ResNet](https://arxiv.org/abs/1512.03385) (He et al., 2016): the classic deep residual network trained with SGD + momentum, which popularized residual connections and batch normalization at scale.
-> - [VGG](https://arxiv.org/abs/1409.1556) (Simonyan & Zisserman, 2015): demonstrated that depth alone could improve performance when paired with SGD and a simple step-wise learning rate schedule.
-
----
-
-## [Adagrad](https://jmlr.org/papers/v12/duchi11a.html): Adaptive Gradient Algorithm
-
-Adagrad adapts the per-parameter learning rate by accumulating the sum of squared gradients over time — parameters that receive frequent or large updates get a smaller effective learning rate, while infrequent parameters get a larger one, making it especially well suited for sparse features.
+Momentum replaces the instantaneous direction with an exponentially weighted history,
 
 $$
-\begin{align*}
-r_t &= r_{t-1} + g_t^2 \\[4pt]
-\theta_{t+1} &= \theta_t - \frac{\eta}{\sqrt{r_t} + \epsilon} \, g_t
-\end{align*}
+v_t=\mu v_{t-1}+g_t,
+\qquad
+\theta_{t+1}=\theta_t-\alpha v_t,
 $$
 
-where $g_t = \nabla \ell(\theta_t)$, $r_t$ is the cumulative sum of squared gradients, $\eta$ is the global learning rate, and $\epsilon$ is a small constant for numerical stability.
+which suppresses oscillation while reinforcing directions that remain consistent across batches.
 
-A key weakness of Adagrad is that $r_t$ grows monotonically, causing the effective learning rate $\eta / \sqrt{r_t}$ to shrink toward zero — the model eventually stops learning.
+> [!example]- Representative applications
+> SGD with momentum was central to the training of influential convolutional networks such as [VGG](https://arxiv.org/abs/1409.1556) and [ResNet](https://arxiv.org/abs/1512.03385). These models pair momentum with scheduled learning-rate reductions to optimize deep vision architectures.
 
-```python
-class AdaGrad(torch.optim.Optimizer):
-    def __init__(self, params, lr=1e-2, eps=1e-10):
-        if lr < 0:
-            raise ValueError(f"Invalid learning rate: {lr}")
-        if eps < 0:
-            raise ValueError(f"Invalid epsilon: {eps}")
+## [Adagrad](https://jmlr.org/papers/v12/duchi11a.html)
 
-        defaults = {
-            "lr": lr,
-            "eps": eps,
-        }
-        super().__init__(params, defaults)
-
-    @torch.no_grad()
-    def step(self) -> None:
-        for group in self.param_groups:
-            lr = group["lr"]
-            eps = group["eps"]
-
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-
-                # get state and grad
-                grad = p.grad
-                state = self.state[p]
-                r = state.get("r", torch.zeros_like(p))
-                r.add_(grad.pow(2))
-
-                # p <- p - lr * grad / (sqrt(r) + eps)
-                p.addcdiv_(grad, r.sqrt().add_(eps), value=-lr)
-
-                # update state
-                state["r"] = r
-```
-
-> [!example]- Use cases
-> Adagrad's per-parameter adaptation makes it naturally effective for problems with sparse features (one-hot, ID, etc.), where some parameters receive updates far less frequently than others.
->
-> - [GloVe](https://aclanthology.org/D14-1162/) (Pennington et al., 2014): used Adagrad to learn word embeddings from a global word co-occurrence matrix — a classic sparse-feature setting where Adagrad's adaptive per-parameter rates shine.
-
----
-
-## [RMSProp](https://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf): Root Mean Squared Propagation
-
-RMSProp adapts the per-parameter learning rate by dividing the gradient by a running average of its recent magnitude — this keeps the update scale consistent across parameters that may have very different gradient scales, without the need for global learning rate tuning.
+Adagrad accumulates squared gradients separately for every parameter:
 
 $$
-\begin{align*}
-v_t &= \beta v_{t-1} + (1 - \beta) \, g_t^2 \\[4pt]
-\theta_{t+1} &= \theta_t - \frac{\eta}{\sqrt{v_t} + \epsilon} \, g_t
-\end{align*}
+r_t=r_{t-1}+g_t^2,
+\qquad
+\theta_{t+1}=\theta_t-\frac{\alpha}{\sqrt{r_t}+\varepsilon}g_t.
 $$
 
-where $g_t = \nabla \ell(\theta_t)$, $\beta \in [0, 1)$ controls the decay of the squared-gradient moving average, $\eta$ is the learning rate, and $\epsilon$ is a small constant for numerical stability.
+Coordinates with frequent or large gradients receive smaller effective learning rates, making the method useful for sparse features. Because $r_t$ only grows, however, its learning rates can eventually become too small.
 
-Unlike Adam, RMSProp lacks a momentum term — it only rescales the gradient but does not accumulate a consistent direction, which can lead to slower convergence along flat or ravine-like loss surfaces. It also has no bias correction for the initial estimate of $v_t$, so early updates can be overly large.
+> [!example]- Representative application
+> [GloVe](https://aclanthology.org/D14-1162/) uses Adagrad to learn word vectors from a sparse word co-occurrence objective, where different parameters are updated at very different frequencies.
 
-```python
-class RMSProp(torch.optim.Optimizer):
-    def __init__(self, params, lr=1e-3, beta=0.9, eps=1e-8):
-        if lr < 0:
-            raise ValueError(f"Invalid learning rate: {lr}")
-        if not 0 <= beta < 1:
-            raise ValueError(f"Invalid beta: {beta}")
-        if eps < 0:
-            raise ValueError(f"Invalid epsilon: {eps}")
+## [RMSProp](https://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf)
 
-        defaults = {
-            "lr": lr,
-            "beta": beta,
-            "eps": eps,
-        }
-        super().__init__(params, defaults)
-
-    @torch.no_grad()
-    def step(self) -> None:
-        for group in self.param_groups:
-            lr = group["lr"]
-            beta = group["beta"]
-            eps = group["eps"]
-
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-
-                # get state and grad
-                state = self.state[p]
-                grad = p.grad
-
-                # v <- beta * v + (1 - beta) * grad^2
-                v = state.get("v", torch.zeros_like(p))
-                v.mul_(beta).addcmul_(grad, grad, value=1 - beta)
-
-                # p <- p - lr * grad / (sqrt(v) + eps)
-                denom = v.sqrt().add_(eps)
-                p.addcdiv_(grad, denom, value=-lr)
-
-                # update state
-                state["v"] = v
-```
-
-> [!example]- Use cases
-> RMSProp was widely adopted in reinforcement learning and early neural machine translation, serving as the direct predecessor to Adam's adaptive scaling.
->
-> - [DQN](https://www.nature.com/articles/nature14236) (Mnih et al., 2015): the breakthrough deep Q-network that achieved human-level play on Atari games, trained with RMSProp for stable online RL.
-> - [Effective NMT](https://arxiv.org/abs/1508.04025) (Luong et al., 2015): used RMSProp to train attention-based seq2seq models, establishing it as the preferred optimizer for early NMT systems.
-
----
-
-## [Adam](https://arxiv.org/abs/1412.6980): A Method for Stochastic Optimization
-
-Adam combines the momentum of SGD with the per-parameter adaptive learning rate of RMSProp, and adds bias correction to both moment estimates — this gives it the benefits of both approaches: a consistent search direction and a well-scaled step size, with stable early-training behavior.
+RMSProp replaces Adagrad's cumulative history with an exponential moving average:
 
 $$
-\begin{align*}
-m_t &= \beta_1 m_{t-1} + (1 - \beta_1) \, g_t \\[4pt]
-v_t &= \beta_2 v_{t-1} + (1 - \beta_2) \, g_t^2 \\[4pt]
-\hat{m}_t &= \frac{m_t}{1 - \beta_1^t} \qquad
-\hat{v}_t = \frac{v_t}{1 - \beta_2^t} \\[4pt]
-\theta_{t+1} &= \theta_t - \eta \, \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
-\end{align*}
+v_t=\beta v_{t-1}+(1-\beta)g_t^2,
+\qquad
+\theta_{t+1}=\theta_t-\frac{\alpha}{\sqrt{v_t}+\varepsilon}g_t.
 $$
 
-where $g_t = \nabla \ell(\theta_t)$, $\beta_1, \beta_2 \in [0, 1)$ control the decay rates of the first and second moment estimates, $t$ is the step counter, and $\epsilon$ is a small constant for numerical stability. The division by $1 - \beta^t$ corrects for the fact that $m_0 = 0$ and $v_0 = 0$ bias the early estimates toward zero.
+Forgetting distant gradients prevents the denominator from growing indefinitely, while retaining coordinate-wise scaling. RMSProp rescales the current gradient but does not maintain a first-moment estimate of its direction.
 
-```python
-class Adam(torch.optim.Optimizer):
-    def __init__(
-        self,
-        params,
-        lr=1e-3,
-        betas=(0.9, 0.999),
-        eps=1e-8,
-        weight_decay=0.0,
-    ) -> None:
-        if lr < 0:
-            raise ValueError(f"Invalid learning rate: {lr}")
+> [!example]- Representative applications
+> RMSProp was used in the [DQN](https://www.nature.com/articles/nature14236) work on Atari and in early attention-based neural machine translation, including [Luong et al.](https://arxiv.org/abs/1508.04025).
 
-        beta1, beta2 = betas
-        if not 0 <= beta1 < 1:
-            raise ValueError(f"Invalid beta1: {beta1}")
-        if not 0 <= beta2 < 1:
-            raise ValueError(f"Invalid beta2: {beta2}")
-        if eps < 0:
-            raise ValueError(f"Invalid epsilon: {eps}")
-        if weight_decay < 0:
-            raise ValueError(f"Invalid weight_decay: {weight_decay}")
+## [Adam](https://arxiv.org/abs/1412.6980)
 
-        defaults = {
-            "lr": lr,
-            "betas": betas,
-            "eps": eps,
-            "weight_decay": weight_decay,
-        }
-        super().__init__(params, defaults)
-
-    @torch.no_grad()
-    def step(self) -> None:
-
-        for group in self.param_groups:
-            lr = group["lr"]
-            beta1, beta2 = group["betas"]
-            eps = group["eps"]
-            weight_decay = group["weight_decay"]
-
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-
-                # grad <- grad + weight_decay * p
-                grad = p.grad.add(p, alpha=weight_decay)
-                state = self.state[p]
-                t = state.get("t", 0)
-                m = state.get("m", torch.zeros_like(p))
-                v = state.get("v", torch.zeros_like(p))
-
-                t += 1
-                # m <- beta1 * m + (1 - beta1) * grad
-                # v <- beta2 * v + (1 - beta2) * grad^2
-                m.mul_(beta1).add_(grad, alpha=1 - beta1)
-                v.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-
-                # bias correction
-                m_hat = m / (1 - beta1**t)
-                v_hat = v / (1 - beta2**t)
-
-                # p <- p - lr * m_hat / (sqrt(v_hat) + eps)
-                p.addcdiv_(m_hat, v_hat.sqrt().add_(eps), value=-lr)
-
-                # update state
-                state["t"] = t
-                state["m"] = m
-                state["v"] = v
-
-```
-
-> [!example]- Use cases
-> Adam was the dominant optimizer throughout the late 2010s, powering the first wave of large-scale transformer language models.
->
-> - [Transformer](https://arxiv.org/abs/1706.03762) (Vaswani et al., 2017): the original "Attention Is All You Need" paper used Adam with a custom warmup-then-decay schedule to train the first transformer model.
-> - [BERT](https://arxiv.org/abs/1810.04805) (Devlin et al., 2019): employed Adam for pre-training the bidirectional encoder that became the foundation of NLP fine-tuning pipelines.
-> - [GPT-2](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) (Radford et al., 2019) and [GPT-3](https://arxiv.org/abs/2005.14165) (Brown et al., 2020): scaled up autoregressive pretraining with Adam, demonstrating the power of scaling data and model size together.
-> - [T5](https://arxiv.org/abs/1910.10683) (Raffel et al., 2020): used Adam to train a unified text-to-text framework that reframed all NLP tasks as sequence generation.
-
----
-
-## [AdamW](https://arxiv.org/abs/1711.05101): Adam with Decoupled Weight Decay
-
-In standard Adam, weight decay is typically implemented as L2 regularization — adding $\lambda \theta$ to the gradient before computing the moment estimates. However, because the Adam update divides by the adaptive step size $\sqrt{\hat{v}_t} + \epsilon$, the weight decay term ends up scaled differently for each parameter: parameters with large gradient histories get less regularization, and vice versa. This coupling means weight decay no longer behaves as a pure, uniform regularizer.
-
-AdamW fixes this by **decoupling** weight decay from the adaptive gradient — it applies weight decay directly to the parameters as a separate step, outside the moment computations:
+Adam combines momentum with RMSProp-style adaptive scaling:
 
 $$
-\begin{align*}
-m_t &= \beta_1 m_{t-1} + (1 - \beta_1) \, g_t \\[4pt]
-v_t &= \beta_2 v_{t-1} + (1 - \beta_2) \, g_t^2 \\[4pt]
-\hat{m}_t &= \frac{m_t}{1 - \beta_1^t} \qquad
-\hat{v}_t = \frac{v_t}{1 - \beta_2^t} \\[4pt]
-\theta_t &= \theta_{t-1} - \eta \lambda \, \theta_{t-1} - \eta \, \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
-\end{align*}
+\begin{aligned}
+m_t&=\beta_1m_{t-1}+(1-\beta_1)g_t,\\
+v_t&=\beta_2v_{t-1}+(1-\beta_2)g_t^2.
+\end{aligned}
 $$
 
-where $g_t = \nabla \ell(\theta_t)$ and $\lambda$ is the weight decay coefficient. Compared with standard Adam, the only change is the explicit ($-\eta \lambda \theta_{t-1}$) term applied directly to the parameters rather than being folded into $g_t$. This simple shift restores the intended semantics of weight decay as a uniform shrinkage of all parameters.
+The two moments provide a smoothed direction and a coordinate-wise scale. Bias correction is needed because both moving averages begin at zero.
 
-The full procedure is summarized below. Decoupled weight decay has since become the standard in transformer training — it generalizes better than L2-regularized Adam with minimal implementation overhead.
+> [!example]- Representative applications
+> Adam underlies several foundational Transformer systems, including the original [Transformer](https://arxiv.org/abs/1706.03762), [BERT](https://arxiv.org/abs/1810.04805), [GPT-2](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf), [GPT-3](https://arxiv.org/abs/2005.14165), and [T5](https://arxiv.org/abs/1910.10683).
+
+## [AdamW](https://arxiv.org/abs/1711.05101)
+
+AdamW replaces the raw gradient with normalized first- and second-moment estimates:
+
+$$
+\begin{aligned}
+m_t&=\beta_1m_{t-1}+(1-\beta_1)g_t,\\
+v_t&=\beta_2v_{t-1}+(1-\beta_2)g_t^2,\\
+\widehat m_t&=\frac{m_t}{1-\beta_1^t},
+&
+\widehat v_t&=\frac{v_t}{1-\beta_2^t}.
+\end{aligned}
+$$
+
+The first moment smooths the update direction, while the second moment rescales coordinates according to their recent gradient magnitude. Bias correction compensates for initializing both estimates at zero.
+
+AdamW applies weight decay directly to the parameters rather than mixing it into the gradient moments:
+
+$$
+\theta_t=(1-\alpha\lambda)\theta_{t-1}
+-\alpha\frac{\widehat m_t}{\sqrt{\widehat v_t}+\varepsilon}.
+$$
+
+This separation preserves a uniform multiplicative shrinkage while leaving the adaptive gradient estimate unchanged. The trade-off is memory: every parameter retains both $m_t$ and $v_t$ throughout training.
 
 {{< figure
   src="figures/AdamW-pseudo.png"
   alt="AdamW pseudocode from the original paper"
-  caption="Pseudocode from the original paper, showing the key difference between Adam and AdamW."
+  caption="AdamW separates weight decay from the adaptive gradient update."
   width="60%"
   align="center"
 >}}
 
-```python
-class AdamW(torch.optim.Optimizer):
-    def __init__(
-        self,
-        params,
-        lr=1e-3,
-        betas=(0.9, 0.999),
-        eps=1e-8,
-        weight_decay=0.0,
-    ) -> None:
-        if lr < 0:
-            raise ValueError(f"Invalid learning rate: {lr}")
-
-        beta1, beta2 = betas
-        if not 0 <= beta1 < 1:
-            raise ValueError(f"Invalid beta1: {beta1}")
-        if not 0 <= beta2 < 1:
-            raise ValueError(f"Invalid beta2: {beta2}")
-        if eps < 0:
-            raise ValueError(f"Invalid epsilon: {eps}")
-        if weight_decay < 0:
-            raise ValueError(f"Invalid weight_decay: {weight_decay}")
-
-        defaults = {
-            "lr": lr,
-            "betas": betas,
-            "eps": eps,
-            "weight_decay": weight_decay,
-        }
-        super().__init__(params, defaults)
-
-    @torch.no_grad()
-    def step(self) -> None:
-        for group in self.param_groups:
-            lr = group["lr"]
-            beta1, beta2 = group["betas"]
-            eps = group["eps"]
-            weight_decay = group["weight_decay"]
-
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-
-                grad = p.grad
-                state = self.state[p]
-                t = state.get("t", 0)
-                m = state.get("m", torch.zeros_like(p))
-                v = state.get("v", torch.zeros_like(p))
-
-                t += 1
-                # AdamW: p <- (1 - lr * weight_decay) * p
-                p.mul_(1 - lr * weight_decay)
-
-                # m <- beta1 * m + (1 - beta1) * grad
-                # v <- beta2 * v + (1 - beta2) * grad^2
-                m.mul_(beta1).add_(grad, alpha=1 - beta1)
-                v.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-
-                # bias correction
-                m_hat = m / (1 - beta1**t)
-                v_hat = v / (1 - beta2**t)
-
-                # p <- p - lr * m_hat / (sqrt(v_hat) + eps)
-                p.addcdiv_(m_hat, v_hat.sqrt().add_(eps), value=-lr)
-
-                # update state
-                state["t"] = t
-                state["m"] = m
-                state["v"] = v
-```
-
-> [!example]- Use cases
-> Since ~2021, AdamW has become the default optimizer for virtually every major transformer language model.
->
-> - [LLaMA](https://arxiv.org/abs/2302.13971) / [LLaMA 2](https://arxiv.org/abs/2307.09288) / [LLaMA 3](https://arxiv.org/abs/2407.21783) (Touvron et al. & Meta): the most influential open-weight LLM family, all trained with AdamW and cosine learning rate schedules.
-> - [Mistral](https://arxiv.org/abs/2310.06825) (Jiang et al., 2023): demonstrated strong 7B-scale performance with AdamW and grouped-query attention.
-> - [Chinchilla](https://arxiv.org/abs/2203.15556) (Hoffmann et al., 2022): used AdamW to establish the "compute-optimal" scaling laws that now guide most LLM training budgets.
-> - [PaLM](https://arxiv.org/abs/2204.02311) (Chowdhery et al., 2022): scaled AdamW to a 540B-parameter model on 6144 TPUs, showing the optimizer's reliability at unprecedented scale.
-> - [Gemma](https://arxiv.org/abs/2403.08295) (Gemma Team, 2024) and [Falcon](https://arxiv.org/abs/2311.16867) (Almazrouei et al., 2023): further confirmed AdamW as the standard choice for both research and deployment-oriented open LLMs.
+> [!example]- Representative applications
+> AdamW is used across modern language-model families, including [LLaMA](https://arxiv.org/abs/2302.13971), [LLaMA 2](https://arxiv.org/abs/2307.09288), [LLaMA 3](https://arxiv.org/abs/2407.21783), [Mistral](https://arxiv.org/abs/2310.06825), [Chinchilla](https://arxiv.org/abs/2203.15556), [PaLM](https://arxiv.org/abs/2204.02311), [Gemma](https://arxiv.org/abs/2403.08295), and [Falcon](https://arxiv.org/abs/2311.16867).
 
 ---
 
-## Learning Rate Scheduling
+# Learning-Rate Scheduling
 
-In practice, it's typical to use a learning rate _schedule_ instead of a constant learning rate. Here we will implement the cosine annealing schedule used in [LLaMA](https://arxiv.org/pdf/2302.13971). It consists of three stages:
+A fixed learning rate cannot serve every stage of training equally well. Linear warmup avoids large updates while the optimizer statistics are still poorly estimated; cosine decay then reduces the step size as optimization approaches a solution.
 
-- warm-up ($t < T_w$): $$\alpha_t = \frac{t}{T_w} \alpha_{\max},$$
-- cosine annealing ($T_w \leq t \leq T_c$): $$\alpha_t = \alpha_{\min} + \frac{1}{2}\left(1 + \cos\left(\frac{t-T_w}{T_c-T_w}\pi\right)\right)(\alpha_{\max} - \alpha_{\min}),$$
-- post-annealing ($t > T_c$): $$\alpha_t = \alpha_{\min},$$
-
-Below is an example cosine learning rate schedule:
-
-{{< figure
-  src="figures/learning_rate_schedule.png"
-  alt="Cosine learning rate schedule with warmup"
-  caption="Cosine learning rate schedule with linear warmup, as used in LLaMA."
-  width="60%"
-  align="center"
->}}
-
->[!note]- Notation
-> - $\alpha_t$: learning rate at step $t$
-> - $\alpha_{\max}$: peak learning rate (reached at the end of warm-up)
-> - $\alpha_{\min}$: minimum learning rate (held after cosine annealing ends)
-> - $t$: current step/iteration number
-> - $T_w$: number of warm-up steps
-> - $T_c$: number of cosine annealing steps (end of the decay phase)
-
->[!experiment]- Learning Rate Plot Code
-> ```python
-> import numpy as np
-> import matplotlib.pyplot as plt
->
-> alpha_max = 3e-4
-> alpha_min = 3e-5
-> T_w = 500
-> T_c = 6000
-> T_total = 12000
->
->
-> if __name__ == "__main__":
->     def learning_rate(t):
->         if t < T_w:
->             return (t / T_w) * alpha_max
->         elif t <= T_c:
->             cosine = 0.5 * (1 + np.cos((t - T_w) / (T_c - T_w) * np.pi))
->             return alpha_min + cosine * (alpha_max - alpha_min)
->         return alpha_min
->
->     steps = np.arange(T_total + 1)
->     lrs = np.array([learning_rate(t) for t in steps])
->
->     plt.plot(steps, lrs, label="Learning rate")
->     plt.axvline(T_w, linestyle="--", label=r"$T_w$ (warm-up end)")
->     plt.axvline(T_c, linestyle=":", label=r"$T_c$ (cosine decay end)")
->
->     plt.xlabel("Training step")
->     plt.ylabel("Learning rate")
->     plt.title("Cosine Annealing Learning Rate Schedule")
->     plt.legend()
->     plt.grid(True)
->
->     plt.savefig("learning_rate_schedule.png", dpi=300, bbox_inches="tight")
-> ```
-
----
-
-## Gradient Clipping
-
-_Gradient clipping_ is a trick to stabilize training. We do it by scaling the gradient $g$ (for all parameters) by a factor to make sure $\lVert g \rVert_2 \leq M$, where $M$ is a given constant. It can be expressed as:
+For peak rate $\alpha_{\max}$, final rate $\alpha_{\min}$, warmup endpoint $T_w$, and decay endpoint $T_c$,
 
 $$
-\hat{g} \leftarrow
+\alpha_t=
 \begin{cases}
-\dfrac{M}{\lVert g \rVert_2 + \varepsilon}\, g,
-& \lVert g \rVert_2 > M, \\[8pt]
-g,
-& \lVert g \rVert_2 \le M.
+\dfrac{t}{T_w}\alpha_{\max},
+&t\lt T_w,\\[8pt]
+\alpha_{\min}
++\dfrac{1}{2}\left[1+\cos\left(\dfrac{t-T_w}{T_c-T_w}\pi\right)\right]
+(\alpha_{\max}-\alpha_{\min}),
+&T_w\le t\le T_c,\\[8pt]
+\alpha_{\min},
+&t\gt T_c.
 \end{cases}
 $$
 
-where $\hat{g}$ is the clipped gradient and $\varepsilon$ is a small constant for numerical stability.
+{{< figure
+  src="figures/learning_rate_schedule.png"
+  alt="A cosine learning-rate schedule with linear warmup"
+  caption="Linear warmup followed by cosine decay and a constant final learning rate."
+  width="60%"
+  align="center"
+>}}
 
-```python
-@torch.no_grad()
-def gradient_clipping(
-    parameters: Iterable[torch.nn.Parameter],
-    max_l2_norm: float,
-    eps: float = 1e-6,
-) -> None:
-    params = [p for p in parameters if p.grad is not None]
-    if not params:
-        return
+---
 
-    l2_norm = sum(p.grad.float().pow(2).sum() for p in params).sqrt()
-    scaling = (max_l2_norm / (l2_norm + eps)).clamp(max=1.0)
+# Gradient Clipping
 
-    for p in params:
-        p.grad.mul_(scaling)
-```
+A single atypical batch can produce a gradient whose norm is large enough to destabilize training. Global norm clipping preserves the gradient direction but limits its magnitude:
+
+$$
+\widehat g=g\min\left(1,\frac{M}{\lVert g\rVert_2+\varepsilon}\right),
+$$
+
+where $g$ concatenates the gradients of all parameters and $M$ is the maximum allowed norm. Gradients below the threshold remain unchanged; larger gradients are rescaled together so their relative proportions are preserved.
+
+---
+
+# Training Resource Accounting
+
+Training memory consists of model parameters, their gradients, optimizer state, and saved activations. We use the following notation:
+
+- $b$: batch size
+- $n$: context length
+- $l$: number of Transformer layers
+- $d$: model width
+- $d_{\mathrm{ff}}$: feed-forward width
+- $h$: number of attention heads
+- $v$: vocabulary size
+
+The parameter count is
+
+$$
+P=d+2dv+l\left(2d+4d^2+3dd_{\mathrm{ff}}\right).
+$$
+
+With $d_{\mathrm{ff}}=\frac{8}{3}d$,
+
+$$
+P=d+2dv+l(2d+12d^2).
+$$
+
+Counting the outputs of the operations specified in the assignment, the saved activations per sequence are
+
+$$
+A=l\left(8nd+4nd_{\mathrm{ff}}+2hn^2\right)+nd+2nv.
+$$
+
+AdamW training in `float32` therefore requires approximately
+
+$$
+\underbrace{P}_{\text{parameters}}
++\underbrace{P}_{\text{gradients}}
++\underbrace{2P}_{\text{AdamW states}}
++\underbrace{bA}_{\text{activations}}=4P+bA
+$$
+
+floating-point values. Since every value occupies four bytes, the corresponding memory is $4(P+P+2P+bA)=4(4P+bA)$ bytes. This estimate follows the simplified activation model requested by the assignment; framework workspaces and temporary buffers are not included.
+
+For computation, let
+
+$$
+F=b\left(24nd^2l+4n^2dl+2ndv\right)
+$$
+
+be the forward-pass FLOPs when $d_{\mathrm{ff}}=\frac{8}{3}d$. Since the backward pass costs approximately twice the forward pass, the model computation for one training step is approximately $3F$. AdamW adds only $O(P)$ element-wise work, which is small compared with the Transformer matrix multiplications at practical batch sizes.
 
 ---
 
 # Solutions
 
-Here are my solutions to the problems given in the writeup.
+> [!note]- Problem (`cross_entropy`): Implement Cross-Entropy (1 point)
+> > [!question]- Deliverable: Implement numerically stable cross-entropy
+> > Write a function that accepts logits and target token IDs, subtracts the maximum logit for numerical stability, avoids explicitly computing unnecessary softmax probabilities, supports arbitrary leading batch dimensions, and returns the mean loss. The implementation is evaluated through `[adapters.run_cross_entropy]`.
+> >
+> > **Answer**: For each target $y$, compute $\operatorname{logsumexp}(o)-o_y$ after shifting the logits by their maximum, then average over every batch-like position.
 
-> [!note]- Problem (learning_rate_tuning): Tuning the learning rate (1 point)
-> > [!question]- As we will see, one of the hyperparameters that affects training the most is the learning rate. Let’s see that in practice in our toy example. Run the SGD example above with three other values for the learning rate: 1e1, 1e2, and 1e3, for just 10 training iterations. What happens with the loss for each of these learning rates? Does it decay faster, slower, or does it diverge (i.e., increase over the course of training)?
-> > For `lr=1e1`, the loss converges slowly. But for `lr=1e2`, it converges quickly to 0. For `lr=1e3`, it diverges.
-> > ```sh
-> > sh> uv run python cs336_basics/trainer/optimizer/sgd.py
-> > ========================================
-> > Current lr=10.0
-> > 26.271406173706055
-> > 16.81369972229004
-> > 12.394342422485352
-> > 9.697249412536621
-> > 7.854771614074707
-> > 6.512506008148193
-> > 5.492434501647949
-> > 4.693441867828369
-> > 4.053155899047852
-> > 3.530749559402466
-> > ========================================
-> > Current lr=100.0
-> > 26.271406173706055
-> > 26.271404266357422
-> > 4.507460117340088
-> > 0.10787364840507507
-> > 1.0858587174674276e-16
-> > 1.2102574668033792e-18
-> > 4.075361842979353e-20
-> > 2.427720975674151e-21
-> > 2.0826556462203992e-22
-> > 2.3140628809483172e-23
-> > ========================================
-> > Current lr=1000.0
-> > 26.271406173706055
-> > 9483.9765625
-> > 1638032.0
-> > 182213568.0
-> > 14759300096.0
-> > 931480731648.0
-> > 47819176017920.0
-> > 2057385568894976.0
-> > 7.583085165648282e+16
-> > 2.4350128106110976e+18
-> > ```
+> [!note]- Problem (`learning_rate_tuning`): Tuning the Learning Rate (1 point)
+> > [!question]- Compare three learning rates in the SGD example
+> > Run the SGD example for ten iterations with learning rates $10$, $100$, and $1000$. Determine whether the loss decreases slowly, converges quickly, or diverges.
+> >
+> > **Deliverable:** A one-to-two sentence description of the observed behavior.
+> >
+> > **Answer**:
+> >
+> > | Learning rate | Loss after 10 iterations | Behavior |
+> > | ---: | ---: | --- |
+> > | $10$ | $3.5307$ | Stable but slow decrease |
+> > | $100$ | $2.31\times10^{-23}$ | Rapid convergence |
+> > | $1000$ | $2.44\times10^{18}$ | Divergence |
+> >
+> > The intermediate rate converges fastest on this quadratic objective. Increasing the rate by another order of magnitude overshoots the stable region and makes the loss grow explosively.
+> >
+> > > [!example]- Reproduce the comparison
+> > > ```bash
+> > > uv run python cs336_basics/optimizer/sgd.py
+> > > ```
 
-> [!note]- Problem (adamw_accounting): Resource accounting for training with AdamW (2 points)
-> Let us compute how much memory and compute running AdamW requires. Assume we are using
-float32 for every tensor.
-> > [!question]- How much peak memory does running AdamW require?
-> > Decompose your answer based on the memory usage of the parameters, activations, gradients, and optimizer state. Express your answer in terms of the `batch_size` and the model hyperparameters (`vocab_size, context_length, num_layers, d_model, num_heads`). Assume $d_{\text{ff}} = \frac{8}{3} \times d_{\text{model}}$.
-> > For simplicity, when calculating memory usage of activations, consider only the following components:
-> > - Transformer block
-> >     - RMSNorm(s)
-> >     - Multi-head self-attention sublayer: $QKV$ projections, $QK^T$ matrix multiply, softmax, weighted sum of values, output projection
-> >     - Position-wise feed-forward (SwiGLU): $W_1$, $W_2$, SiLU on the gate branch, element-wise product, $W_3$
-> >     - final RMSNorm
-> >     - output embedding
-> >     - cross-entropy on logits
+> [!note]- Problem (`adamw`): Implement AdamW (2 points)
+> > [!question]- Deliverable: Implement the AdamW optimizer
+> > Implement AdamW as a subclass of `torch.optim.Optimizer`, accepting the learning rate, moment coefficients, numerical-stability constant, and weight-decay rate. Store the first moment, second moment, and step counter for each parameter. The implementation is evaluated through `[adapters.get_adamw_cls]`.
 > >
-> > **Answer**: Let's compute each component one by one.
-> >
-> > Notation: $b$: `batch_size`, $v$: `vocab_size`, $n$: `context_length`, $l$: `num_layers`, $d$: `d_model`, $h$: `num_heads`.
-> >
-> > _parameters_: $d + 2dv + l \times (2d + 12d^2)$ elements.
-> > - Embedding: $dv$
-> > - Transformer Block ($\times l$): $2d + 12d^2$
-> >     - Attention Block: $d + 4d^2$
-> >         - RMSNorm: $d$
-> >         - Attention: $4d^2$
-> >             - $W_Q$: $d^2$
-> >             - $W_K$: $d^2$
-> >             - $W_V$: $d^2$
-> >             - $W_O$: $d^2$
-> >     - FFN Block: $d + 3dd_{\text{ff}} = d + 8d^2$
-> >         - RMSNorm: $d$
-> >         - FFN: $3dd_{\text{ff}}$
-> >             - $W_1$: $dd_{\text{ff}}$
-> >             - $W_2$: $dd_{\text{ff}}$
-> >             - $W_3$: $dd_{\text{ff}}$
-> > - Output RMSNorm: $d$
-> > - LM Head: $dv$
-> >
-> > _activations_ ($\times b$): $17ndl + 2hn^2l$ elements.
-> > - Transformer Block ($\times l$): $17nd + 2hn^2$
-> >     - Attention Block: $6nd + 2hn^2$
-> >         - Input: $nd$
-> >         - Normalized input: $nd$
-> >         - Q, K, V: $3nd$
-> >         - Attention score ($QK^T$): $hn^2$
-> >         - Softmax output (attention weights): $hn^2$
-> >         - Attention output: $nd$
-> >     - FFN Block: $11nd$
-> >         - Input: $nd$
-> >         - Normalized input: $nd$
-> >         - Gate ($W_1$): $\frac{8}{3}nd$
-> >         - Value ($W_2$): $\frac{8}{3}nd$
-> >         - Element-wise product (gate $\odot$ value): $\frac{8}{3}nd$
-> >         - FFN output ($W_3$): $nd$
-> >
-> > _gradients_: each parameter has 1 corresponding gradient. So there are 1 _parameter_ elements.
-> >
-> > _optimizer state_: With AdamW, each parameter has an $m$ state ($g$) and a $v$ state ($g^2$). Ignore the $t$ state, then there are 2 _parameter_ elements.
-> >
-> > So in total:
-> > $$
-\begin{align*}
-\text{memory}
-&= (\text{parameters} + b \times \text{activations} \\
-&\quad + \text{gradients} + \text{optimizer state}) \times 4 \text{bytes} \\
-&= (4 \times \text{parameters} + b \times \text{activations}) \times 4 \text{bytes} \\
-&= \left[ 4(d + 2dv + 2dl + 12d^2l) + b(17ndl + 2hn^2l) \right] \times 4 \text{bytes} \\
-\end{align*}
-$$
+> > **Answer**: Each step updates the biased moments, corrects their initialization bias, applies the normalized gradient update, and decays the parameter independently of those moments.
+
+> [!note]- Problem (`adamw_accounting`): Resource Accounting for Training with AdamW (2 points)
+> > Assume every tensor uses `float32` and $d_{\mathrm{ff}}=\frac{8}{3}d$.
 >
-> > [!question]- Instantiate your answer for a GPT-2 XL-shaped model to get an expression that only depends on the `batch_size`. What is the maximum batch size you can use and still fit within 80GB memory?
-> > **Answer**: Official GPT-2 model is on [github](https://github.com/openai/gpt-2). According to this repository, we can get the [configuration](https://openaipublic.blob.core.windows.net/gpt-2/models/1558M/hparams.json) for GPT-2 XL (1558M):
-> > ```json
-> > {
-> >   "n_vocab": 50257,
-> >   "n_ctx": 1024,
-> >   "n_embd": 1600,
-> >   "n_head": 25,
-> >   "n_layer": 48
-> > }
-> > ```
+> > [!question]- (a) Derive peak training memory
+> > Decompose peak memory into parameters, activations, gradients, and AdamW optimizer state. Include the Transformer-block operations, final RMSNorm, LM head, and cross-entropy activations specified by the assignment.
 > >
-> > Instantiate our answer with this configuration, we get:
-> > ```sh
-> > memory usage = 26.17 GB + b x 15.41 GB
-> > max batch size = 3
-> > ```
+> > **Deliverable:** An algebraic expression for every component and their total.
 > >
-> > > [!experiment]- Compute on GPT-2 XL
-> > > We can compute using this script:
-> > > ```python
-> > > import json
-> > > import requests
-> > >
-> > > def main():
-> > >     # get GPT-2 XL-shaped configuration
-> > >     hparams_url = "https://openaipublic.blob.core.windows.net/gpt-2/models/1558M/hparams.json"
-> > >     response = requests.get(hparams_url, timeout=10)
-> > >     response.raise_for_status()
-> > >     hparams = response.json()
-> > >
-> > >     # read configuration
-> > >     v = hparams["n_vocab"]
-> > >     n = hparams["n_ctx"]
-> > >     d = hparams["n_embd"]
-> > >     h = hparams["n_head"]
-> > >     l = hparams["n_layer"]
-> > >
-> > >     # compute memory usage
-> > >     # C1: fixed memory (params + grads + optimizer) — does NOT scale with batch
-> > >     # C2: per-sample activation memory — scales with batch
-> > >     C1 = (4 * (d + 2*d*v + 2*d*l + 12 * (d ** 2) * l)) * 4
-> > >     C2 = (17 * n * d * l + 2 * h * (n ** 2) * l) * 4
-> > >     C1_GB = C1 / 1e9
-> > >     C2_GB = C2 / 1e9
-> > >     print(f"memory usage = {C1_GB:.2f} GB + b x {C2_GB:.2f} GB")
-> > >
-> > >     # compute max batch size
-> > >     max_memory = 80 # GPU memory is 80 GB
-> > >     max_b = int((max_memory - C1_GB) // C2_GB)
-> > >     print(f"max batch size = {max_b}")
-> > >
-> > > if __name__ == "__main__":
-> > >     main()
+> > **Answer**: Define $P=d+2dv+l(2d+12d^2)$.
+> >
+> > | Component | Number of `float32` values |
+> > | --- | ---: |
+> > | Parameters | $P$ |
+> > | Gradients | $P$ |
+> > | AdamW first and second moments | $2P$ |
+> > | Transformer-block activations | $bl\left(\frac{56}{3}nd+2hn^2\right)$ |
+> > | Final RMSNorm | $bnd$ |
+> > | LM-head logits | $bnv$ |
+> > | Cross-entropy intermediates | $bnv$ |
+> >
+> > Thus $M_{\mathrm{peak}}=4\left[P+P+2P+b\left(l\left(\frac{56}{3}nd+2hn^2\right)+nd+2nv\right)\right]$ bytes.
+>
+> > [!question]- (b) Instantiate the estimate for GPT-2 XL
+> > Use $v=50{,}257$, $n=1{,}024$, $l=48$, $d=1{,}600$, and $h=25$. Express memory as a function of batch size and find the largest integer batch size that fits within 80 GB.
+> >
+> > **Deliverable:** An expression $a\cdot b+c$ and the maximum batch size.
+> >
+> > **Answer**: $M_{\mathrm{peak}}(b)\approx16.36b+26.17$ GB. The largest batch size below 80 GB is therefore $b=3$. This is an accounting estimate rather than a guarantee, since it excludes allocator overhead and temporary workspaces.
+> >
+> > > [!example]- Reproduce the memory estimate
+> > > ```bash
+> > > uv run python scripts/resource_accounting.py training-memory
 > > > ```
 >
-> >[!question]- How many FLOPs does running one step of AdamW take?
-> > **Answer**: Total FLOPs consists of three parts: forward, backward, optimizer step.
-> > - Forward: In [last section](../03-transformer-language-model-architecture/#compute), we computed the total FLOPs for 1 forward pass:
-> > $$
-\begin{align*}
-\text{forward FLOPs} &= b\left[l(8nd^2 + 4n^2d + 6ndd_{\text{ff}}) + 2ndv \right] \\
-&= b(24nd^2l + 4n^2dl + 2ndv)
-\end{align*}
-$$
+> > [!question]- (c) Count the FLOPs in one AdamW training step
+> > Include the forward pass, backward pass, and element-wise optimizer update.
 > >
-> > - Backward: The total FLOPs for 1 backward pass is approximately twice the amount of 1 forward pass. A toy matmul example explains this: suppose $C \in \mathbb{R}^{m \times n}, A \in \mathbb{R}^{m \times p}, B \in \mathbb{R}^{p \times n}, L \in \mathbb{R}$ is a scalar loss, $G = \frac{\partial L}{\partial C} \in \mathbb{R}^{m \times n}$ is the gradient of $C$, and $C = AB$, then the forward FLOPs is $2mnp$. For backward, we need to compute:
+> > **Deliverable:** An algebraic expression with a brief justification.
 > >
-> >     $$
-\begin{align*}
-\frac{\partial L}{\partial A} &= \frac{\partial L}{\partial C} B^T \Rightarrow 2 mnp \text{ FLOPs} \\
-\frac{\partial L}{\partial B} &= A^T \frac{\partial L}{\partial C} \Rightarrow 2 mnp \text{ FLOPs} \\
-\end{align*}
-$$
-> >
-> >     so in total it's $4mnp$ FLOPs, which is $2\times$ the forward FLOPs.
-> >
-> > - Optimizer state: In AdamW, for each parameter at each step, we need to compute $m$, $v$ and update the parameter $\theta$. So the total FLOPs for this update is $C \times \#\text{parameters}$, where $C$ is some constant corresponding to the FLOPs of 1 parameter at 1 step. I think this constant is around $20$.
-> >
-> > Add these up, we get:
-> >
-> > $$
-\begin{align*}
-\text{total FLOPs} &\approx 3 \text{ forward FLOPs} + \text{ update FLOPs} \\
-&= 3b(24nd^2l + 4n^2dl + 2ndv)  \\
-&\quad + C \times (d + 2dv + 2dl + 12d^2l)
-\end{align*}
-$$
+> > **Answer**: Let $F=b\left(24nd^2l+4n^2dl+2ndv\right)$ denote the forward-pass cost. The forward and backward passes require approximately $3F$ FLOPs. Counting the scalar operations in the AdamW update gives another $14P$ FLOPs, so $F_{\mathrm{step}}\approx3F+14P$. The optimizer term is normally negligible beside the matrix multiplications.
 >
-> >[!question]- Model FLOPs utilization (MFU) is defined as the ratio of observed throughput (tokens per second) relative to the hardware’s theoretical peak FLOP throughput [A. Chowdhery et al., 2022]. An NVIDIA H100 GPU has a theoretical peak of 495 teraFLOP/s for "float32" (actually TensorFloat-32, which in reality is "bfloat19") operations. Assuming you are able to get 50\% MFU, how long would it take to train a GPT-2 XL for 400K steps and a batch size of 1024 on a single H100? Following J. Kaplan et al. and J. Hoffmann et al. , assume that the backward pass has twice the FLOPs of the forward pass.
-> > **Answer**: The result shows that it takes about $4836.2$ hours to train.
+> > [!question]- (d) Estimate GPT-2 XL training time on one H100
+> > Assume 400,000 steps, batch size 1,024, 495 TFLOP/s theoretical throughput, 50% MFU, and a backward pass costing twice the forward pass.
 > >
-> > >[!experiment]- Compute Training Hours
-> > > ```python
-> > > import requests
-> > >
-> > > def get_forward_FLOPs(
-> > >     b, v, n, l, d,
-> > >     ) -> int:
-> > >     return b * (24 * n * (d**2) * l + 4 * (n**2) * d * l + 2 * n * d * v)
-> > >
-> > > def get_total_FLOPs(
-> > >     steps,
-> > >     b, v, n, l, d, h,
-> > >     ) -> int:
-> > >
-> > >     one_step = 3 * get_forward_FLOPs(b, v, n, l, d) + 20 * (d + 2 * d * v + 2 * d * l + 12 * (d**2) * l)
-> > >     return steps * one_step
-> > >
-> > > def main():
-> > >
-> > >     # get GPT-2 XL-shaped configuration
-> > >     hparams_url = "https://openaipublic.blob.core.windows.net/gpt-2/models/1558M/hparams.json"
-> > >     response = requests.get(hparams_url, timeout=10)
-> > >     response.raise_for_status()
-> > >     hparams = response.json()
-> > >
-> > >     # read configuration
-> > >     v = hparams["n_vocab"]
-> > >     n = hparams["n_ctx"]
-> > >     d = hparams["n_embd"]
-> > >     h = hparams["n_head"]
-> > >     l = hparams["n_layer"]
-> > >     b = 1024
-> > >     steps = 400 * 1000
-> > >
-> > >     total_FLOPs = get_total_FLOPs(steps, b, v, n, l, d, h)
-> > >     mfu = 0.5
-> > >     full_speed = 495 * 1e12
-> > >     total_seconds = total_FLOPs / (full_speed * mfu)
-> > >     total_hours = total_seconds / 3600
-> > >
-> > >     print(f"Takes {total_hours:.2f} hours to train")
-> > >
-> > >
-> > > if __name__ == "__main__":
-> > >     main()
+> > **Deliverable:** The number of training hours with a brief justification.
+> >
+> > **Answer**: The effective throughput is $0.5\times495=247.5$ TFLOP/s. Dividing the total work for 400,000 steps by this throughput gives approximately **4,836 hours**, or **202 days**, on a single H100.
+> >
+> > > [!example]- Reproduce the training-time estimate
+> > > ```bash
+> > > uv run python scripts/resource_accounting.py training-time
 > > > ```
+
+> [!note]- Problem (`learning_rate_schedule`): Implement Cosine Learning-Rate Scheduling (1 point)
+> > [!question]- Deliverable: Implement linear warmup followed by cosine decay
+> > Write a function of $t$, $\alpha_{\max}$, $\alpha_{\min}$, $T_w$, and $T_c$ that returns the piecewise schedule defined above. The implementation is evaluated through `[adapters.get_lr_cosine_schedule]`.
+> >
+> > **Answer**: The schedule increases linearly from zero to $\alpha_{\max}$ during warmup, follows half a cosine wave down to $\alpha_{\min}$, and remains at $\alpha_{\min}$ after $T_c$.
+
+> [!note]- Problem (`gradient_clipping`): Implement Gradient Clipping (1 point)
+> > [!question]- Deliverable: Clip the global gradient norm in place
+> > Accept an iterable of parameters and a maximum $\ell_2$ norm. Compute the norm across all available parameter gradients and rescale them together when it exceeds the threshold, using $\varepsilon=10^{-6}$. The implementation is evaluated through `[adapters.run_gradient_clipping]`.
+> >
+> > **Answer**: Multiplying every gradient by $\min(1,M/(\lVert g\rVert_2+\varepsilon))$ preserves their joint direction while enforcing the global norm limit.
