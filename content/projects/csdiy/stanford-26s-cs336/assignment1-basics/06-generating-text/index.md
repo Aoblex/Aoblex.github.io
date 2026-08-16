@@ -114,7 +114,7 @@ outputs/<experiment>/generation/
 └── samples.md
 ```
 
-The metadata records the checkpoint step, prompt, random seed, device, token budget, and sampling method. This makes stochastic samples attributable to a specific model and decoding configuration.
+The metadata records the checkpoint step, prompt, random seed, device, token budget, temperature, and top-$p$. This makes stochastic samples attributable to a specific model and decoding configuration.
 
 The smoke model exercises the complete generation path, but its output is not a meaningful quality result. The requested 256-token sample should come from the trained baseline model in [Section 7](../07-experiments/#tinystories).
 
