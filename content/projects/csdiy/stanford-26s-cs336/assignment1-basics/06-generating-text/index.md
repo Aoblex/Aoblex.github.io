@@ -1,165 +1,163 @@
 +++
 title = 'Section 6: Generating Text'
 date = '2026-07-01T14:51:15+08:00'
-summary = 'Generate text from our model.'
+summary = 'Turn next-token logits into autoregressive text with temperature and nucleus sampling.'
 weight = 60
 draft = false
 +++
 
-First of all, let's make the notations clear:
+# Introduction
 
-- $n$: sequence length;
-- $v$: the vocabulary size;
-- $\mathbb{V} = \{0, 1, 2, \ldots, v-1\}$: the set of token IDs;
-- $\Delta^v = \{(x_0, x_1, \ldots, x_{v-1}) \in \mathbb{R}^v \mid x_i \geq 0, \sum x_i = 1\}$: probability simplex;
-- $X \in \mathbb{V}^{n}$: input token IDs;
-- $O \in \mathbb{R}^{n \times v}$: output logits;
-- $P \in (\Delta^v)^{n}$: output probabilities;
+Training evaluates all next-token predictions in parallel, but generation reveals tokens sequentially. At each step, the model produces logits for the current context, a decoding rule turns the final-position logits into a sampling distribution, and one sampled token is appended to the sequence.
+
+The model determines which continuations are plausible; the decoder determines how probability mass is distributed among those possibilities. Temperature and top-$p$ sampling adjust this distribution without changing the model itself.
 
 ---
 
-# Text Generation Loop
+# Autoregressive Generation
 
-In order to sample discrete IDs from $O$, we usually use $\text{softmax}$ to convert the logits to normalized probabilities. So the generation loop could be represented as:
-
-$$
-X \in \mathbb{V}^{n} \xrightarrow{\text{model}} O \in \mathbb{R}^{n \times v} \xrightarrow{\text{softmax}} P \in (\Delta^v)^{n} \xrightarrow{\text{decoder}} x_{n+1} \in \mathbb{V}
-$$
-
-When decoding, we only take the last probability distribution for next token prediction, which is effectively:
+Given a prompt $x_{1:t}$, the model returns one logit vector for every position. Only the final vector is needed to generate the next token:
 
 $$
-P[n] \in \Delta^v \xrightarrow{\text{decoder}} x_{n+1} \in \mathbb{V}
+z_t=\operatorname{TransformerLM}(x_{1:t})_t\in\mathbb{R}^{v}.
 $$
 
-Here I use $P[n]$ informally to mean the probability distribution at the current last position. It is not meant to emphasize Python-style indexing. The important idea is that the decoder only needs the next-token distribution from the final position of the current context.
+A sampling rule converts $z_t$ into a distribution $q_t$ and draws
 
-When we get this token $x_{n+1}$, we append it to the input $X$ and then generate the next token ID. This loop continues until we meet an ending condition: eos token or maximum length reached _etc._.
+$$
+x_{t+1}\sim q_t.
+$$
+
+Generation then repeats the same recurrence:
+
+1. Run the model on the available context.
+2. Select the logits at the final position.
+3. Transform the logits according to the decoding parameters.
+4. Sample one token and append it to the sequence.
+5. Stop after producing EOS or reaching the generation limit.
+
+When the sequence exceeds the model's context length, only the most recent context window is passed to the model. Without a KV cache, this implementation recomputes the hidden states for that window at every step; the algorithm is simple, but repeated prefixes make decoding much more expensive than one parallel training pass.
 
 ---
 
-# Decoder
+# Sampling
 
-The core of text generation is the decoder, which could be separated into two settings: next-token prediction (NTP) and multi-token prediction (MTP).
+## Temperature
 
----
-
-## NTP
-
-In NTP, the model gives me one next-token distribution at the current last position. We sample one token, append it to the context, and then repeat the same process.
-
-### Simple Sampling
-
-We can generate new tokens by repeatedly sampling from this conditioned distribution:
+Temperature rescales logits before softmax:
 
 $$
-P[n, i] = P(x_{n+1} = i \mid x_{1 \ldots n}) = \frac{\exp(o_i)}{\sum_j \exp(o_j)}
+q_i(\tau)=\frac{\exp(z_i/\tau-c)}{\sum_{j=1}^{v}\exp(z_j/\tau-c)},
+\qquad
+c=\max_j\frac{z_j}{\tau},
 $$
 
-In code, I take the logits at the final position, convert them to probabilities, and sample one token ID from this categorical distribution:
+where $\tau\gt0$. The transformation preserves the ranking of tokens while changing the concentration of the distribution:
 
-```python
-def sample_next_token(logits: torch.Tensor) -> torch.Tensor:
-    """Sample token ids directly from the softmax distribution."""
-    if logits.ndim != 2:
-        raise ValueError(f"Expected logits with shape (batch, vocab), got {tuple(logits.shape)}")
+- $\tau\lt1$ sharpens the distribution and favors high-probability tokens;
+- $\tau=1$ recovers the original softmax distribution;
+- $\tau\gt1$ flattens the distribution and increases diversity;
+- as $\tau\to0$, sampling approaches greedy decoding.
 
-    probs = torch.softmax(logits, dim=-1)
-    return torch.multinomial(probs, num_samples=1).squeeze(-1)
-```
+Temperature changes relative probabilities across the entire vocabulary, including the low-probability tail. This can increase diversity, but it does not prevent implausible tail tokens from being sampled.
 
-### Sampling with Temperature
+## Top-$p$ Sampling
 
-We modify our $\text{softmax}$ with a temperature parameter $\tau$:
+[Top-$p$ sampling](https://arxiv.org/abs/1904.09751), or nucleus sampling, restricts sampling to the smallest high-probability set whose cumulative mass reaches a threshold $p$.
 
-$$
-P[n, i] = P_{\tau}(x_{n+1} = i \mid x_{1 \ldots n}) = \frac{\exp(o_i/\tau)}{\sum_j \exp(o_j/\tau)}
-$$
-
-When $\tau < 1$, the distribution becomes sharper and the model becomes more conservative. When $\tau > 1$, the distribution becomes flatter and sampling becomes more diverse. The implementation is just simple sampling after rescaling logits:
-
-```python
-def sample_next_token_with_temperature(logits: torch.Tensor, temperature: float) -> torch.Tensor:
-    """Sample token ids after scaling logits by temperature."""
-    if temperature <= 0:
-        raise ValueError(f"temperature must be positive, got {temperature}")
-
-    return sample_next_token(logits / temperature)
-```
-
-### Sampling with top-$p$ (nucleus)
-
-Top-$p$ sampling, also known as nucleus sampling, was introduced by [Holtzman et al. (2020)](https://arxiv.org/abs/1904.09751) in *The Curious Case of Neural Text Degeneration*. The main idea is to truncate low-probability tokens:
+Sort the temperature-scaled probabilities so that
 
 $$
-P[n, i] = P_p(x_{n+1} = i \mid x_{1 \ldots n}) =
+q_{(1)}\ge q_{(2)}\ge\cdots\ge q_{(v)},
+$$
+
+and define
+
+$$
+k^*=\min\left\{k:\sum_{r=1}^{k}q_{(r)}\ge p\right\},
+\qquad
+S_p=\{(1),\ldots,(k^*)\}.
+$$
+
+The final sampling distribution is
+
+$$
+\widetilde q_i=
 \begin{cases}
-\frac{\exp(o_i)}{\sum_{j \in T(p)} \exp(o_j)} & \text{if } i \in T(p) \\
-0 & \text{otherwise}
+\dfrac{q_i}{\sum_{j\in S_p}q_j},&i\in S_p,\\[8pt]
+0,&i\notin S_p.
 \end{cases}
 $$
 
-where $T(p)$ is the smallest prefix of tokens, sorted by probability from high to low, such that $\sum_{j \in T(p)} P[n, j] \ge p$.
+Unlike top-$k$, the number of retained tokens adapts to the model's uncertainty. A confident prediction produces a small nucleus; a diffuse prediction retains more alternatives. The token that crosses the threshold must remain in the set, otherwise its cumulative mass can fall below $p$.
 
-The implementation first sorts tokens by probability, keeps the smallest high-probability prefix, renormalizes the remaining probabilities, and finally maps the sampled sorted position back to the original token ID:
-
-```python
-def sample_next_token_top_p(logits: torch.Tensor, p: float) -> torch.Tensor:
-    """Sample token ids from the smallest high-probability set with cumulative mass at least p."""
-    if logits.ndim != 2:
-        raise ValueError(f"Expected logits with shape (batch, vocab), got {tuple(logits.shape)}")
-    if not 0 < p <= 1:
-        raise ValueError(f"p must be in (0, 1], got {p}")
-
-    probs = torch.softmax(logits, dim=-1)
-    sorted_probs, sorted_indices = torch.sort(probs, dim=-1, descending=True)
-    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
-
-    remove_mask = cumulative_probs > p
-    remove_mask[..., 1:] = remove_mask[..., :-1].clone()
-    remove_mask[..., 0] = False
-
-    filtered_probs = sorted_probs.masked_fill(remove_mask, 0.0)
-    filtered_probs = filtered_probs / filtered_probs.sum(dim=-1, keepdim=True)
-
-    sampled_sorted_positions = torch.multinomial(filtered_probs, num_samples=1)
-    return sorted_indices.gather(dim=-1, index=sampled_sorted_positions).squeeze(-1)
-```
+Temperature and top-$p$ address different aspects of sampling and can be applied in sequence: temperature reshapes the distribution, then top-$p$ removes its low-probability tail.
 
 ---
 
-## MTP
+# Generation Interface
 
-MTP is a natural extension of the same idea. Instead of training the model to predict only $x_{n+1}$ at each position, the training objective asks it to predict several future tokens, such as:
+Generation uses the same experiment file as training. It reconstructs the model and tokenizer from checkpoint metadata, then reads the prompts, stopping budget, and sampling settings from the `generation` section.
 
-$$
-x_{n+1}, x_{n+2}, \ldots, x_{n+k}
-$$
+> [!example]- Validate and run generation
+> ```bash
+> uv run python scripts/generate.py configs/tinystories-smoke.yaml --check
+> make generate CONFIG=configs/tinystories-smoke.yaml
+> ```
 
-### Modern MTP
+The generated text and the state needed to interpret it are stored together:
 
-[Better & Faster Large Language Models via Multi-token Prediction](https://arxiv.org/abs/2404.19737) is the most direct reference for this idea in modern decoder-only LLMs. Its setup is simple: keep a shared transformer trunk, and attach several output heads on top of it. Head 1 predicts the ordinary next token, head 2 predicts the token after that, and so on. During inference, the extra heads can either be discarded, or they can be used to propose draft tokens for self-speculative decoding.
+```text
+outputs/<experiment>/generation/
+├── config.yaml
+├── metadata.json
+└── samples.md
+```
+
+The metadata records the checkpoint step, prompt, random seed, device, token budget, and sampling method. This makes stochastic samples attributable to a specific model and decoding configuration.
+
+The smoke model exercises the complete generation path, but its output is not a meaningful quality result. The requested 256-token sample should come from the trained baseline model in [Section 7](../07-experiments/#tinystories).
+
+---
+
+# Multi-Token Prediction
+
+The assignment uses ordinary next-token prediction: every position learns to predict one future token, and inference samples one new token per model call. Multi-token prediction (MTP) extends the training objective so that a representation predicts several future tokens.
+
+## Parallel Prediction Heads
+
+[Gloeckle et al.](https://arxiv.org/abs/2404.19737) attach several prediction heads to a shared Transformer trunk. Head $r$ predicts the token $r$ positions ahead, so a single representation is supervised by multiple future targets.
 
 {{< figure
   src="figures/gloeckle-mtp-overview.png"
   alt="Multi-token prediction overview from Gloeckle et al."
-  caption="Multi-token prediction overview from Gloeckle et al."
+  caption="Several prediction heads share one Transformer trunk and target different future offsets."
   width="55%"
   align="center"
 >}}
 
-This is the modern LLM formulation of MTP. There were earlier ideas with a similar flavor, such as future n-gram prediction in [ProphetNet](https://arxiv.org/abs/2001.04063), but Gloeckle et al. is the clean reference for the decoder-only LLM setting discussed here.
+The auxiliary heads can be discarded at inference, leaving the ordinary next-token model, or used to propose draft tokens for self-speculative decoding. Earlier work such as [ProphetNet](https://arxiv.org/abs/2001.04063) applies a related future n-gram objective, while Gloeckle et al. formulate the idea directly for decoder-only language models.
 
-### DeepSeek-V3 MTP
+## DeepSeek-V3
 
-[DeepSeek-V3](https://arxiv.org/abs/2412.19437) also uses MTP, but its implementation is not just a copy of the parallel-head version above. In the technical report, the authors say their MTP design is inspired by Gloeckle et al., but they predict the additional tokens sequentially and keep a complete causal chain at each prediction depth.
+[DeepSeek-V3](https://arxiv.org/abs/2412.19437) predicts additional tokens through sequential MTP modules rather than independent parallel heads. Each depth combines the previous representation with the embedding of a future token, applies another Transformer block, and predicts the next future target through the shared output head.
 
 {{< figure
   src="figures/deepseek-v3-mtp.png"
   alt="DeepSeek-V3 multi-token prediction module"
-  caption="DeepSeek-V3 multi-token prediction module."
+  caption="DeepSeek-V3 preserves a causal chain across successive prediction depths."
   width="80%"
   align="center"
 >}}
 
-The main model still handles ordinary next-token prediction. Then each MTP module takes the previous depth representation and the embedding of a future token, combines them with a projection, runs a Transformer block, and predicts the next future token through the shared output head. DeepSeek-V3 sets the MTP depth to 1, so in practice each position predicts the next token plus one additional token.
+DeepSeek-V3 uses one additional prediction depth: the main model predicts the next token, while the MTP module predicts one token further ahead. This auxiliary objective improves representations during training and can support speculative generation, but it is separate from the decoding implementation required by this assignment.
+
+---
+
+# Solutions
+
+> [!note]- Problem (`decoding`): Decoding (3 points)
+> > [!question]- Deliverable: Implement autoregressive text generation
+> > Generate a completion for a user-provided prompt until EOS or a configurable maximum number of new tokens. Support temperature scaling and top-$p$ sampling with user-provided values.
+> >
+> > **Answer**: Encode the prompt, repeatedly evaluate the final-position logits, apply temperature and nucleus filtering, sample the next token, and append it to the context. Stop when EOS is sampled or the token budget is exhausted, then decode the complete token sequence back to text.
