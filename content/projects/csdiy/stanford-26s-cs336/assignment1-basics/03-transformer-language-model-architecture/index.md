@@ -370,13 +370,15 @@ At moderate context lengths, the FFN and projection terms usually dominate becau
 > >
 > > **Answer**:
 > >
-> > | Operation | Matrix multiplications | FLOPs | Share |
-> > | --- | --- | ---: | ---: |
-> > | QKV and output projections | $3(n\times d)(d\times d)+(n\times d)(d\times d)$ per layer | $1.0066\times10^{12}$ | 28.62% |
-> > | Attention scores | $h(n\times d_h)(d_h\times n)$ per layer | $1.6106\times10^{11}$ | 4.58% |
-> > | Attention value mixing | $h(n\times n)(n\times d_h)$ per layer | $1.6106\times10^{11}$ | 4.58% |
-> > | SwiGLU projections | $2(n\times d)(d\times d_{\mathrm{ff}})+(n\times d_{\mathrm{ff}})(d_{\mathrm{ff}}\times d)$ per layer | $2.0233\times10^{12}$ | 57.53% |
-> > | LM head | $(n\times d)(d\times v)$ | $1.6468\times10^{11}$ | 4.68% |
+> > | Operation | Multiplications | FLOPs | Share |
+> > | --- | ---: | ---: | ---: |
+> > | QKV projections | $3nd^2l$ | $6nd^2l=7.5497\times10^{11}$ | 21.47% |
+> > | Output projection | $nd^2l$ | $2nd^2l=2.5166\times10^{11}$ | 7.16% |
+> > | Attention scores | $n^2dl$ | $2n^2dl=1.6106\times10^{11}$ | 4.58% |
+> > | Attention value mixing | $n^2dl$ | $2n^2dl=1.6106\times10^{11}$ | 4.58% |
+> > | SwiGLU input projections | $2ndd_{\mathrm{ff}}l$ | $4ndd_{\mathrm{ff}}l=1.3489\times10^{12}$ | 38.36% |
+> > | SwiGLU output projection | $ndd_{\mathrm{ff}}l$ | $2ndd_{\mathrm{ff}}l=6.7444\times10^{11}$ | 19.18% |
+> > | LM head | $ndv$ | $2ndv=1.6468\times10^{11}$ | 4.68% |
 > > | **Total** |  | **$3.5168\times10^{12}$** | **100.00%** |
 > >
 > > One forward pass costs approximately **3.52T FLOPs** for a single sequence.
