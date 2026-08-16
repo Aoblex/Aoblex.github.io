@@ -1,0 +1,491 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg version="1.1" width="1200" height="298" onload="init(evt)" viewBox="0 0 1200 298" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:fg="http://github.com/jonhoo/inferno"><!--Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples.--><!--NOTES: --><defs><linearGradient id="background" y1="0" y2="1" x1="0" x2="0"><stop stop-color="#eeeeee" offset="5%"/><stop stop-color="#eeeeb0" offset="95%"/></linearGradient></defs><style type="text/css">
+text { font-family:monospace; font-size:12px }
+#title { text-anchor:middle; font-size:17px; }
+#matched { text-anchor:end; }
+#search { text-anchor:end; opacity:0.1; cursor:pointer; }
+#search:hover, #search.show { opacity:1; }
+#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+#unzoom { cursor:pointer; }
+#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+.hide { display:none; }
+.parent { opacity:0.5; }
+</style><script type="text/ecmascript"><![CDATA[
+        var nametype = 'Function:';
+        var fontsize = 12;
+        var fontwidth = 0.59;
+        var xpad = 10;
+        var inverted = true;
+        var searchcolor = 'rgb(230,0,230)';
+        var fluiddrawing = true;
+        var truncate_text_right = false;
+    ]]><![CDATA["use strict";
+var details, searchbtn, unzoombtn, matchedtxt, svg, searching, frames, known_font_width;
+function init(evt) {
+    details = document.getElementById("details").firstChild;
+    searchbtn = document.getElementById("search");
+    unzoombtn = document.getElementById("unzoom");
+    matchedtxt = document.getElementById("matched");
+    svg = document.getElementsByTagName("svg")[0];
+    frames = document.getElementById("frames");
+    known_font_width = get_monospace_width(frames);
+    total_samples = parseInt(frames.attributes.total_samples.value);
+    searching = 0;
+
+    // Use GET parameters to restore a flamegraph's state.
+    var restore_state = function() {
+        var params = get_params();
+        if (params.x && params.y)
+            zoom(find_group(document.querySelector('[*|x="' + params.x + '"][y="' + params.y + '"]')));
+        if (params.s)
+            search(params.s);
+    };
+
+    if (fluiddrawing) {
+        // Make width dynamic so the SVG fits its parent's width.
+        svg.removeAttribute("width");
+        // Edge requires us to have a viewBox that gets updated with size changes.
+        var isEdge = /Edge\/\d./i.test(navigator.userAgent);
+        if (!isEdge) {
+            svg.removeAttribute("viewBox");
+        }
+        var update_for_width_change = function() {
+            if (isEdge) {
+                svg.attributes.viewBox.value = "0 0 " + svg.width.baseVal.value + " " + svg.height.baseVal.value;
+            }
+
+            // Keep consistent padding on left and right of frames container.
+            frames.attributes.width.value = svg.width.baseVal.value - xpad * 2;
+
+            // Text truncation needs to be adjusted for the current width.
+            update_text_for_elements(frames.children);
+
+            // Keep search elements at a fixed distance from right edge.
+            var svgWidth = svg.width.baseVal.value;
+            searchbtn.attributes.x.value = svgWidth - xpad;
+            matchedtxt.attributes.x.value = svgWidth - xpad;
+        };
+        window.addEventListener('resize', function() {
+            update_for_width_change();
+        });
+        // This needs to be done asynchronously for Safari to work.
+        setTimeout(function() {
+            unzoom();
+            update_for_width_change();
+            restore_state();
+        }, 0);
+    } else {
+        restore_state();
+    }
+}
+// event listeners
+window.addEventListener("click", function(e) {
+    var target = find_group(e.target);
+    if (target) {
+        if (target.nodeName == "a") {
+            if (e.ctrlKey === false) return;
+            e.preventDefault();
+        }
+        if (target.classList.contains("parent")) unzoom();
+        zoom(target);
+
+        // set parameters for zoom state
+        var el = target.querySelector("rect");
+        if (el && el.attributes && el.attributes.y && el.attributes["fg:x"]) {
+            var params = get_params()
+            params.x = el.attributes["fg:x"].value;
+            params.y = el.attributes.y.value;
+            history.replaceState(null, null, parse_params(params));
+        }
+    }
+    else if (e.target.id == "unzoom") {
+        unzoom();
+
+        // remove zoom state
+        var params = get_params();
+        if (params.x) delete params.x;
+        if (params.y) delete params.y;
+        history.replaceState(null, null, parse_params(params));
+    }
+    else if (e.target.id == "search") search_prompt();
+}, false)
+// mouse-over for info
+// show
+window.addEventListener("mouseover", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = nametype + " " + g_to_text(target);
+}, false)
+// clear
+window.addEventListener("mouseout", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = ' ';
+}, false)
+// ctrl-F for search
+window.addEventListener("keydown",function (e) {
+    if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+        e.preventDefault();
+        search_prompt();
+    }
+}, false)
+// functions
+function get_params() {
+    var params = {};
+    var paramsarr = window.location.search.substr(1).split('&');
+    for (var i = 0; i < paramsarr.length; ++i) {
+        var tmp = paramsarr[i].split("=");
+        if (!tmp[0] || !tmp[1]) continue;
+        params[tmp[0]]  = decodeURIComponent(tmp[1]);
+    }
+    return params;
+}
+function parse_params(params) {
+    var uri = "?";
+    for (var key in params) {
+        uri += key + '=' + encodeURIComponent(params[key]) + '&';
+    }
+    if (uri.slice(-1) == "&")
+        uri = uri.substring(0, uri.length - 1);
+    if (uri == '?')
+        uri = window.location.href.split('?')[0];
+    return uri;
+}
+function find_child(node, selector) {
+    var children = node.querySelectorAll(selector);
+    if (children.length) return children[0];
+    return;
+}
+function find_group(node) {
+    var parent = node.parentElement;
+    if (!parent) return;
+    if (parent.id == "frames") return node;
+    return find_group(parent);
+}
+function orig_save(e, attr, val) {
+    if (e.attributes["fg:orig_" + attr] != undefined) return;
+    if (e.attributes[attr] == undefined) return;
+    if (val == undefined) val = e.attributes[attr].value;
+    e.setAttribute("fg:orig_" + attr, val);
+}
+function orig_load(e, attr) {
+    if (e.attributes["fg:orig_"+attr] == undefined) return;
+    e.attributes[attr].value = e.attributes["fg:orig_" + attr].value;
+    e.removeAttribute("fg:orig_" + attr);
+}
+function g_to_text(e) {
+    var text = find_child(e, "title").firstChild.nodeValue;
+    return (text)
+}
+function g_to_func(e) {
+    var func = g_to_text(e);
+    // if there's any manipulation we want to do to the function
+    // name before it's searched, do it here before returning.
+    return (func);
+}
+function get_monospace_width(frames) {
+    // Given the id="frames" element, return the width of text characters if
+    // this is a monospace font, otherwise return 0.
+    text = find_child(frames.children[0], "text");
+    originalContent = text.textContent;
+    text.textContent = "!";
+    bangWidth = text.getComputedTextLength();
+    text.textContent = "W";
+    wWidth = text.getComputedTextLength();
+    text.textContent = originalContent;
+    if (bangWidth === wWidth) {
+        return bangWidth;
+    } else {
+        return 0;
+    }
+}
+function update_text_for_elements(elements) {
+    // In order to render quickly in the browser, you want to do one pass of
+    // reading attributes, and one pass of mutating attributes. See
+    // https://web.dev/avoid-large-complex-layouts-and-layout-thrashing/ for details.
+
+    // Fall back to inefficient calculation, if we're variable-width font.
+    // TODO This should be optimized somehow too.
+    if (known_font_width === 0) {
+        for (var i = 0; i < elements.length; i++) {
+            update_text(elements[i]);
+        }
+        return;
+    }
+
+    var textElemNewAttributes = [];
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var r = find_child(e, "rect");
+        var t = find_child(e, "text");
+        var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+        var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+        var newX = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+        // Smaller than this size won't fit anything
+        if (w < 2 * known_font_width) {
+            textElemNewAttributes.push([newX, ""]);
+            continue;
+        }
+
+        // Fit in full text width
+        if (txt.length * known_font_width < w) {
+            textElemNewAttributes.push([newX, txt]);
+            continue;
+        }
+
+        var substringLength = Math.floor(w / known_font_width) - 2;
+        if (truncate_text_right) {
+            // Truncate the right side of the text.
+            textElemNewAttributes.push([newX, txt.substring(0, substringLength) + ".."]);
+            continue;
+        } else {
+            // Truncate the left side of the text.
+            textElemNewAttributes.push([newX, ".." + txt.substring(txt.length - substringLength, txt.length)]);
+            continue;
+        }
+    }
+
+    console.assert(textElemNewAttributes.length === elements.length, "Resize failed, please file a bug at https://github.com/jonhoo/inferno/");
+
+    // Now that we know new textContent, set it all in one go so we don't refresh a bazillion times.
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var values = textElemNewAttributes[i];
+        var t = find_child(e, "text");
+        t.attributes.x.value = values[0];
+        t.textContent = values[1];
+    }
+}
+
+function update_text(e) {
+    var r = find_child(e, "rect");
+    var t = find_child(e, "text");
+    var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+    var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+    t.attributes.x.value = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+    // Smaller than this size won't fit anything
+    if (w < 2 * fontsize * fontwidth) {
+        t.textContent = "";
+        return;
+    }
+    t.textContent = txt;
+    // Fit in full text width
+    if (t.getComputedTextLength() < w)
+        return;
+    if (truncate_text_right) {
+        // Truncate the right side of the text.
+        for (var x = txt.length - 2; x > 0; x--) {
+            if (t.getSubStringLength(0, x + 2) <= w) {
+                t.textContent = txt.substring(0, x) + "..";
+                return;
+            }
+        }
+    } else {
+        // Truncate the left side of the text.
+        for (var x = 2; x < txt.length; x++) {
+            if (t.getSubStringLength(x - 2, txt.length) <= w) {
+                t.textContent = ".." + txt.substring(x, txt.length);
+                return;
+            }
+        }
+    }
+    t.textContent = "";
+}
+// zoom
+function zoom_reset(e) {
+    if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * parseInt(e.attributes["fg:x"].value) / total_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / total_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_reset(c[i]);
+    }
+}
+function zoom_child(e, x, zoomed_width_samples) {
+    if (e.tagName == "text") {
+        var parent_x = parseFloat(find_child(e.parentNode, "rect[x]").attributes.x.value);
+        e.attributes.x.value = format_percent(parent_x + (100 * 3 / frames.attributes.width.value));
+    } else if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * (parseInt(e.attributes["fg:x"].value) - x) / zoomed_width_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / zoomed_width_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_child(c[i], x, zoomed_width_samples);
+    }
+}
+function zoom_parent(e) {
+    if (e.attributes) {
+        if (e.attributes.x != undefined) {
+            e.attributes.x.value = "0.0%";
+        }
+        if (e.attributes.width != undefined) {
+            e.attributes.width.value = "100.0%";
+        }
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_parent(c[i]);
+    }
+}
+function zoom(node) {
+    var attr = find_child(node, "rect").attributes;
+    var width = parseInt(attr["fg:w"].value);
+    var xmin = parseInt(attr["fg:x"].value);
+    var xmax = xmin + width;
+    var ymin = parseFloat(attr.y.value);
+    unzoombtn.classList.remove("hide");
+    var el = frames.children;
+    var to_update_text = [];
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        var a = find_child(e, "rect").attributes;
+        var ex = parseInt(a["fg:x"].value);
+        var ew = parseInt(a["fg:w"].value);
+        // Is it an ancestor
+        if (!inverted) {
+            var upstack = parseFloat(a.y.value) > ymin;
+        } else {
+            var upstack = parseFloat(a.y.value) < ymin;
+        }
+        if (upstack) {
+            // Direct ancestor
+            if (ex <= xmin && (ex+ew) >= xmax) {
+                e.classList.add("parent");
+                zoom_parent(e);
+                to_update_text.push(e);
+            }
+            // not in current path
+            else
+                e.classList.add("hide");
+        }
+        // Children maybe
+        else {
+            // no common path
+            if (ex < xmin || ex >= xmax) {
+                e.classList.add("hide");
+            }
+            else {
+                zoom_child(e, xmin, width);
+                to_update_text.push(e);
+            }
+        }
+    }
+    update_text_for_elements(to_update_text);
+}
+function unzoom() {
+    unzoombtn.classList.add("hide");
+    var el = frames.children;
+    for(var i = 0; i < el.length; i++) {
+        el[i].classList.remove("parent");
+        el[i].classList.remove("hide");
+        zoom_reset(el[i]);
+    }
+    update_text_for_elements(el);
+}
+// search
+function reset_search() {
+    var el = document.querySelectorAll("#frames rect");
+    for (var i = 0; i < el.length; i++) {
+        orig_load(el[i], "fill")
+    }
+    var params = get_params();
+    delete params.s;
+    history.replaceState(null, null, parse_params(params));
+}
+function search_prompt() {
+    if (!searching) {
+        var term = prompt("Enter a search term (regexp " +
+            "allowed, eg: ^ext4_)", "");
+        if (term != null) {
+            search(term)
+        }
+    } else {
+        reset_search();
+        searching = 0;
+        searchbtn.classList.remove("show");
+        searchbtn.firstChild.nodeValue = "Search"
+        matchedtxt.classList.add("hide");
+        matchedtxt.firstChild.nodeValue = ""
+    }
+}
+function search(term) {
+    var re = new RegExp(term);
+    var el = frames.children;
+    var matches = new Object();
+    var maxwidth = 0;
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        // Skip over frames which are either not visible, or below the zoomed-to frame
+        if (e.classList.contains("hide") || e.classList.contains("parent")) {
+            continue;
+        }
+        var func = g_to_func(e);
+        var rect = find_child(e, "rect");
+        if (func == null || rect == null)
+            continue;
+        // Save max width. Only works as we have a root frame
+        var w = parseInt(rect.attributes["fg:w"].value);
+        if (w > maxwidth)
+            maxwidth = w;
+        if (func.match(re)) {
+            // highlight
+            var x = parseInt(rect.attributes["fg:x"].value);
+            orig_save(rect, "fill");
+            rect.attributes.fill.value = searchcolor;
+            // remember matches
+            if (matches[x] == undefined) {
+                matches[x] = w;
+            } else {
+                if (w > matches[x]) {
+                    // overwrite with parent
+                    matches[x] = w;
+                }
+            }
+            searching = 1;
+        }
+    }
+    if (!searching)
+        return;
+    var params = get_params();
+    params.s = term;
+    history.replaceState(null, null, parse_params(params));
+
+    searchbtn.classList.add("show");
+    searchbtn.firstChild.nodeValue = "Reset Search";
+    // calculate percent matched, excluding vertical overlap
+    var count = 0;
+    var lastx = -1;
+    var lastw = 0;
+    var keys = Array();
+    for (k in matches) {
+        if (matches.hasOwnProperty(k))
+            keys.push(k);
+    }
+    // sort the matched frames by their x location
+    // ascending, then width descending
+    keys.sort(function(a, b){
+        return a - b;
+    });
+    // Step through frames saving only the biggest bottom-up frames
+    // thanks to the sort order. This relies on the tree property
+    // where children are always smaller than their parents.
+    for (var k in keys) {
+        var x = parseInt(keys[k]);
+        var w = matches[keys[k]];
+        if (x >= lastx + lastw) {
+            count += w;
+            lastx = x;
+            lastw = w;
+        }
+    }
+    // display matched percent
+    matchedtxt.classList.remove("hide");
+    var pct = 100 * count / maxwidth;
+    if (pct != 100) pct = pct.toFixed(1);
+    matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+}
+function format_percent(n) {
+    return n.toFixed(4) + "%";
+}
+]]></script><rect x="0" y="0" width="100%" height="298" fill="url(#background)"/><text id="title" fill="rgb(0,0,0)" x="50.0000%" y="24.00">py-spy record --subprocesses -o tmp/profile/training-profile.svg -- python -m cs336_basics.tokenizer.bpe_trainer --input_path data/TinyStoriesV2-GPT4-train.txt --vocab_size 10000 --desired_num_chunks 512</text><text id="details" fill="rgb(0,0,0)" x="10" y="40.00"> </text><text id="unzoom" class="hide" fill="rgb(0,0,0)" x="10" y="24.00">Reset Zoom</text><text id="search" fill="rgb(0,0,0)" x="1190" y="24.00">Search</text><text id="matched" fill="rgb(0,0,0)" x="1190" y="287.00"> </text><svg id="frames" x="10" width="1180" total_samples="29700"><g><title>recv (multiprocessing/connection.py:250) (131 samples, 0.44%)</title><rect x="0.0943%" y="148" width="0.4411%" height="15" fill="rgb(227,0,7)" fg:x="28" fg:w="131"/><text x="0.3443%" y="158.50"></text></g><g><title>_recv_bytes (multiprocessing/connection.py:437) (131 samples, 0.44%)</title><rect x="0.0943%" y="164" width="0.4411%" height="15" fill="rgb(217,0,24)" fg:x="28" fg:w="131"/><text x="0.3443%" y="174.50"></text></g><g><title>_recv (multiprocessing/connection.py:395) (131 samples, 0.44%)</title><rect x="0.0943%" y="180" width="0.4411%" height="15" fill="rgb(221,193,54)" fg:x="28" fg:w="131"/><text x="0.3443%" y="190.50"></text></g><g><title>run (concurrent/futures/process.py:352) (192 samples, 0.65%)</title><rect x="0.0875%" y="116" width="0.6465%" height="15" fill="rgb(248,212,6)" fg:x="26" fg:w="192"/><text x="0.3375%" y="126.50"></text></g><g><title>wait_result_broken_or_wakeup (concurrent/futures/process.py:432) (190 samples, 0.64%)</title><rect x="0.0943%" y="132" width="0.6397%" height="15" fill="rgb(208,68,35)" fg:x="28" fg:w="190"/><text x="0.3443%" y="142.50"></text></g><g><title>recv (multiprocessing/connection.py:251) (59 samples, 0.20%)</title><rect x="0.5354%" y="148" width="0.1987%" height="15" fill="rgb(232,128,0)" fg:x="159" fg:w="59"/><text x="0.7854%" y="158.50"></text></g><g><title>_feed (multiprocessing/queues.py:264) (43 samples, 0.14%)</title><rect x="0.7879%" y="132" width="0.1448%" height="15" fill="rgb(207,160,47)" fg:x="234" fg:w="43"/><text x="1.0379%" y="142.50"></text></g><g><title>dumps (multiprocessing/reduction.py:51) (43 samples, 0.14%)</title><rect x="0.7879%" y="148" width="0.1448%" height="15" fill="rgb(228,23,34)" fg:x="234" fg:w="43"/><text x="1.0379%" y="158.50"></text></g><g><title>_bootstrap (threading.py:1032) (2,605 samples, 8.77%)</title><rect x="0.0774%" y="84" width="8.7710%" height="15" fill="rgb(218,30,26)" fg:x="23" fg:w="2605"/><text x="0.3274%" y="94.50">_bootstrap (..</text></g><g><title>_bootstrap_inner (threading.py:1075) (2,605 samples, 8.77%)</title><rect x="0.0774%" y="100" width="8.7710%" height="15" fill="rgb(220,122,19)" fg:x="23" fg:w="2605"/><text x="0.3274%" y="110.50">_bootstrap_i..</text></g><g><title>run (threading.py:1012) (2,394 samples, 8.06%)</title><rect x="0.7879%" y="116" width="8.0606%" height="15" fill="rgb(250,228,42)" fg:x="234" fg:w="2394"/><text x="1.0379%" y="126.50">run (thread..</text></g><g><title>_feed (multiprocessing/queues.py:270) (2,350 samples, 7.91%)</title><rect x="0.9360%" y="132" width="7.9125%" height="15" fill="rgb(240,193,28)" fg:x="278" fg:w="2350"/><text x="1.1860%" y="142.50">_feed (mult..</text></g><g><title>send_bytes (multiprocessing/connection.py:200) (2,350 samples, 7.91%)</title><rect x="0.9360%" y="148" width="7.9125%" height="15" fill="rgb(216,20,37)" fg:x="278" fg:w="2350"/><text x="1.1860%" y="158.50">send_bytes ..</text></g><g><title>_send_bytes (multiprocessing/connection.py:421) (2,350 samples, 7.91%)</title><rect x="0.9360%" y="164" width="7.9125%" height="15" fill="rgb(206,188,39)" fg:x="278" fg:w="2350"/><text x="1.1860%" y="174.50">_send_bytes..</text></g><g><title>_send (multiprocessing/connection.py:384) (2,350 samples, 7.91%)</title><rect x="0.9360%" y="180" width="7.9125%" height="15" fill="rgb(217,207,13)" fg:x="278" fg:w="2350"/><text x="1.1860%" y="190.50">_send (mult..</text></g><g><title>initialize (cs336_basics/tokenizer/bpe_trainer.py:79) (91 samples, 0.31%)</title><rect x="8.9192%" y="148" width="0.3064%" height="15" fill="rgb(231,73,38)" fg:x="2649" fg:w="91"/><text x="9.1692%" y="158.50"></text></g><g><title>initialize (cs336_basics/tokenizer/bpe_trainer.py:96) (162 samples, 0.55%)</title><rect x="9.2593%" y="148" width="0.5455%" height="15" fill="rgb(225,20,46)" fg:x="2750" fg:w="162"/><text x="9.5093%" y="158.50"></text></g><g><title>update (collections/__init__.py:694) (151 samples, 0.51%)</title><rect x="9.2963%" y="164" width="0.5084%" height="15" fill="rgb(210,31,41)" fg:x="2761" fg:w="151"/><text x="9.5463%" y="174.50"></text></g><g><title>train (cs336_basics/tokenizer/bpe_trainer.py:220) (285 samples, 0.96%)</title><rect x="8.8552%" y="132" width="0.9596%" height="15" fill="rgb(221,200,47)" fg:x="2630" fg:w="285"/><text x="9.1052%" y="142.50"></text></g><g><title>apply_merge (cs336_basics/tokenizer/bpe_trainer.py:122) (69 samples, 0.23%)</title><rect x="9.8519%" y="148" width="0.2323%" height="15" fill="rgb(226,26,5)" fg:x="2926" fg:w="69"/><text x="10.1019%" y="158.50"></text></g><g><title>_run_module_as_main (&lt;frozen runpy&gt;:198) (426 samples, 1.43%)</title><rect x="8.8485%" y="84" width="1.4343%" height="15" fill="rgb(249,33,26)" fg:x="2628" fg:w="426"/><text x="9.0985%" y="94.50"></text></g><g><title>_run_code (&lt;frozen runpy&gt;:88) (426 samples, 1.43%)</title><rect x="8.8485%" y="100" width="1.4343%" height="15" fill="rgb(235,183,28)" fg:x="2628" fg:w="426"/><text x="9.0985%" y="110.50"></text></g><g><title>&lt;module&gt; (cs336_basics/tokenizer/bpe_trainer.py:281) (424 samples, 1.43%)</title><rect x="8.8552%" y="116" width="1.4276%" height="15" fill="rgb(221,5,38)" fg:x="2630" fg:w="424"/><text x="9.1052%" y="126.50"></text></g><g><title>train (cs336_basics/tokenizer/bpe_trainer.py:237) (131 samples, 0.44%)</title><rect x="9.8418%" y="132" width="0.4411%" height="15" fill="rgb(247,18,42)" fg:x="2923" fg:w="131"/><text x="10.0918%" y="142.50"></text></g><g><title>process 85428:&quot;&quot; (2,589 samples, 8.72%)</title><rect x="10.2828%" y="84" width="8.7172%" height="15" fill="rgb(241,131,45)" fg:x="3054" fg:w="2589"/><text x="10.5328%" y="94.50">process 8542..</text></g><g><title>&lt;module&gt; (&lt;string&gt;:1) (2,588 samples, 8.71%)</title><rect x="10.2862%" y="100" width="8.7138%" height="15" fill="rgb(249,31,29)" fg:x="3055" fg:w="2588"/><text x="10.5362%" y="110.50">&lt;module&gt; (&lt;s..</text></g><g><title>main (multiprocessing/resource_tracker.py:252) (2,586 samples, 8.71%)</title><rect x="10.2929%" y="116" width="8.7071%" height="15" fill="rgb(225,111,53)" fg:x="3057" fg:w="2586"/><text x="10.5429%" y="126.50">main (multip..</text></g><g><title>get (multiprocessing/queues.py:102) (76 samples, 0.26%)</title><rect x="19.0606%" y="196" width="0.2559%" height="15" fill="rgb(238,160,17)" fg:x="5661" fg:w="76"/><text x="19.3106%" y="206.50"></text></g><g><title>__enter__ (multiprocessing/synchronize.py:95) (76 samples, 0.26%)</title><rect x="19.0606%" y="212" width="0.2559%" height="15" fill="rgb(214,148,48)" fg:x="5661" fg:w="76"/><text x="19.3106%" y="222.50"></text></g><g><title>_recv (multiprocessing/connection.py:395) (101 samples, 0.34%)</title><rect x="19.3266%" y="244" width="0.3401%" height="15" fill="rgb(232,36,49)" fg:x="5740" fg:w="101"/><text x="19.5766%" y="254.50"></text></g><g><title>get (multiprocessing/queues.py:103) (105 samples, 0.35%)</title><rect x="19.3165%" y="196" width="0.3535%" height="15" fill="rgb(209,103,24)" fg:x="5737" fg:w="105"/><text x="19.5665%" y="206.50"></text></g><g><title>recv_bytes (multiprocessing/connection.py:216) (105 samples, 0.35%)</title><rect x="19.3165%" y="212" width="0.3535%" height="15" fill="rgb(229,88,8)" fg:x="5737" fg:w="105"/><text x="19.5665%" y="222.50"></text></g><g><title>_recv_bytes (multiprocessing/connection.py:437) (102 samples, 0.34%)</title><rect x="19.3266%" y="228" width="0.3434%" height="15" fill="rgb(213,181,19)" fg:x="5740" fg:w="102"/><text x="19.5766%" y="238.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:252) (185 samples, 0.62%)</title><rect x="19.0606%" y="180" width="0.6229%" height="15" fill="rgb(254,191,54)" fg:x="5661" fg:w="185"/><text x="19.3106%" y="190.50"></text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:64) (30 samples, 0.10%)</title><rect x="19.7104%" y="212" width="0.1010%" height="15" fill="rgb(241,83,37)" fg:x="5854" fg:w="30"/><text x="19.9604%" y="222.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:264) (2,187 samples, 7.36%)</title><rect x="19.6835%" y="180" width="7.3636%" height="15" fill="rgb(233,36,39)" fg:x="5846" fg:w="2187"/><text x="19.9335%" y="190.50">_process_w..</text></g><g><title>_process_chunk (concurrent/futures/process.py:213) (2,187 samples, 7.36%)</title><rect x="19.6835%" y="196" width="7.3636%" height="15" fill="rgb(226,3,54)" fg:x="5846" fg:w="2187"/><text x="19.9335%" y="206.50">_process_c..</text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:66) (2,149 samples, 7.24%)</title><rect x="19.8114%" y="212" width="7.2357%" height="15" fill="rgb(245,192,40)" fg:x="5884" fg:w="2149"/><text x="20.0614%" y="222.50">process_ch..</text></g><g><title>update (collections/__init__.py:699) (505 samples, 1.70%)</title><rect x="25.3468%" y="228" width="1.7003%" height="15" fill="rgb(238,167,29)" fg:x="7528" fg:w="505"/><text x="25.5968%" y="238.50"></text></g><g><title>process 85429:&quot;python -m cs336_basics.tokenizer.bpe_trainer --input_path data/TinyStoriesV2-GPT4-train.txt --vocab_size 10000 --desired_num_chunks 512&quot; (2,412 samples, 8.12%)</title><rect x="19.0000%" y="84" width="8.1212%" height="15" fill="rgb(232,182,51)" fg:x="5643" fg:w="2412"/><text x="19.2500%" y="94.50">process 854..</text></g><g><title>&lt;module&gt; (&lt;string&gt;:1) (2,410 samples, 8.11%)</title><rect x="19.0067%" y="100" width="8.1145%" height="15" fill="rgb(231,60,39)" fg:x="5645" fg:w="2410"/><text x="19.2567%" y="110.50">&lt;module&gt; (&lt;..</text></g><g><title>spawn_main (multiprocessing/spawn.py:122) (2,408 samples, 8.11%)</title><rect x="19.0135%" y="116" width="8.1077%" height="15" fill="rgb(208,69,12)" fg:x="5647" fg:w="2408"/><text x="19.2635%" y="126.50">spawn_main ..</text></g><g><title>_main (multiprocessing/spawn.py:135) (2,394 samples, 8.06%)</title><rect x="19.0606%" y="132" width="8.0606%" height="15" fill="rgb(235,93,37)" fg:x="5661" fg:w="2394"/><text x="19.3106%" y="142.50">_main (mult..</text></g><g><title>_bootstrap (multiprocessing/process.py:314) (2,394 samples, 8.06%)</title><rect x="19.0606%" y="148" width="8.0606%" height="15" fill="rgb(213,116,39)" fg:x="5661" fg:w="2394"/><text x="19.3106%" y="158.50">_bootstrap ..</text></g><g><title>run (multiprocessing/process.py:108) (2,394 samples, 8.06%)</title><rect x="19.0606%" y="164" width="8.0606%" height="15" fill="rgb(222,207,29)" fg:x="5661" fg:w="2394"/><text x="19.3106%" y="174.50">run (multip..</text></g><g><title>get (multiprocessing/queues.py:102) (54 samples, 0.18%)</title><rect x="27.1650%" y="212" width="0.1818%" height="15" fill="rgb(206,96,30)" fg:x="8068" fg:w="54"/><text x="27.4150%" y="222.50"></text></g><g><title>__enter__ (multiprocessing/synchronize.py:95) (54 samples, 0.18%)</title><rect x="27.1650%" y="228" width="0.1818%" height="15" fill="rgb(218,138,4)" fg:x="8068" fg:w="54"/><text x="27.4150%" y="238.50"></text></g><g><title>_recv (multiprocessing/connection.py:395) (76 samples, 0.26%)</title><rect x="27.3535%" y="260" width="0.2559%" height="15" fill="rgb(250,191,14)" fg:x="8124" fg:w="76"/><text x="27.6035%" y="270.50"></text></g><g><title>get (multiprocessing/queues.py:103) (79 samples, 0.27%)</title><rect x="27.3468%" y="212" width="0.2660%" height="15" fill="rgb(239,60,40)" fg:x="8122" fg:w="79"/><text x="27.5968%" y="222.50"></text></g><g><title>recv_bytes (multiprocessing/connection.py:216) (79 samples, 0.27%)</title><rect x="27.3468%" y="228" width="0.2660%" height="15" fill="rgb(206,27,48)" fg:x="8122" fg:w="79"/><text x="27.5968%" y="238.50"></text></g><g><title>_recv_bytes (multiprocessing/connection.py:437) (77 samples, 0.26%)</title><rect x="27.3535%" y="244" width="0.2593%" height="15" fill="rgb(225,35,8)" fg:x="8124" fg:w="77"/><text x="27.6035%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:252) (134 samples, 0.45%)</title><rect x="27.1650%" y="196" width="0.4512%" height="15" fill="rgb(250,213,24)" fg:x="8068" fg:w="134"/><text x="27.4150%" y="206.50"></text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:64) (43 samples, 0.14%)</title><rect x="27.6498%" y="228" width="0.1448%" height="15" fill="rgb(247,123,22)" fg:x="8212" fg:w="43"/><text x="27.8998%" y="238.50"></text></g><g><title>split (regex/_main.py:333) (39 samples, 0.13%)</title><rect x="27.6633%" y="244" width="0.1313%" height="15" fill="rgb(231,138,38)" fg:x="8216" fg:w="39"/><text x="27.9133%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:264) (2,235 samples, 7.53%)</title><rect x="27.6162%" y="196" width="7.5253%" height="15" fill="rgb(231,145,46)" fg:x="8202" fg:w="2235"/><text x="27.8662%" y="206.50">_process_w..</text></g><g><title>_process_chunk (concurrent/futures/process.py:213) (2,235 samples, 7.53%)</title><rect x="27.6162%" y="212" width="7.5253%" height="15" fill="rgb(251,118,11)" fg:x="8202" fg:w="2235"/><text x="27.8662%" y="222.50">_process_c..</text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:66) (2,181 samples, 7.34%)</title><rect x="27.7980%" y="228" width="7.3434%" height="15" fill="rgb(217,147,25)" fg:x="8256" fg:w="2181"/><text x="28.0480%" y="238.50">process_ch..</text></g><g><title>update (collections/__init__.py:699) (491 samples, 1.65%)</title><rect x="33.4882%" y="244" width="1.6532%" height="15" fill="rgb(247,81,37)" fg:x="9946" fg:w="491"/><text x="33.7382%" y="254.50"></text></g><g><title>process 85430:&quot;/Users/trytry/workspace/assignment1-basics/.venv/bin/python -c from multiprocessing.spawn import spawn_main (2,407 samples, 8.10%)</title><rect x="27.1212%" y="84" width="8.1044%" height="15" fill="rgb(209,12,38)" fg:x="8055" fg:w="2407"/><text x="27.3712%" y="94.50">process 854..</text></g><g><title> spawn_main(tracker_fd=9, pipe_handle=19) --multiprocessing-fork&quot; (2,407 samples, 8.10%)</title><rect x="27.1212%" y="100" width="8.1044%" height="15" fill="rgb(227,1,9)" fg:x="8055" fg:w="2407"/><text x="27.3712%" y="110.50"> spawn_main..</text></g><g><title>&lt;module&gt; (&lt;string&gt;:1) (2,405 samples, 8.10%)</title><rect x="27.1279%" y="116" width="8.0976%" height="15" fill="rgb(248,47,43)" fg:x="8057" fg:w="2405"/><text x="27.3779%" y="126.50">&lt;module&gt; (&lt;..</text></g><g><title>spawn_main (multiprocessing/spawn.py:122) (2,405 samples, 8.10%)</title><rect x="27.1279%" y="132" width="8.0976%" height="15" fill="rgb(221,10,30)" fg:x="8057" fg:w="2405"/><text x="27.3779%" y="142.50">spawn_main ..</text></g><g><title>_main (multiprocessing/spawn.py:135) (2,394 samples, 8.06%)</title><rect x="27.1650%" y="148" width="8.0606%" height="15" fill="rgb(210,229,1)" fg:x="8068" fg:w="2394"/><text x="27.4150%" y="158.50">_main (mult..</text></g><g><title>_bootstrap (multiprocessing/process.py:314) (2,394 samples, 8.06%)</title><rect x="27.1650%" y="164" width="8.0606%" height="15" fill="rgb(222,148,37)" fg:x="8068" fg:w="2394"/><text x="27.4150%" y="174.50">_bootstrap ..</text></g><g><title>run (multiprocessing/process.py:108) (2,394 samples, 8.06%)</title><rect x="27.1650%" y="180" width="8.0606%" height="15" fill="rgb(234,67,33)" fg:x="8068" fg:w="2394"/><text x="27.4150%" y="190.50">run (multip..</text></g><g><title>get (multiprocessing/queues.py:102) (40 samples, 0.13%)</title><rect x="35.2593%" y="212" width="0.1347%" height="15" fill="rgb(247,98,35)" fg:x="10472" fg:w="40"/><text x="35.5093%" y="222.50"></text></g><g><title>__enter__ (multiprocessing/synchronize.py:95) (40 samples, 0.13%)</title><rect x="35.2593%" y="228" width="0.1347%" height="15" fill="rgb(247,138,52)" fg:x="10472" fg:w="40"/><text x="35.5093%" y="238.50"></text></g><g><title>_recv (multiprocessing/connection.py:395) (91 samples, 0.31%)</title><rect x="35.4141%" y="260" width="0.3064%" height="15" fill="rgb(213,79,30)" fg:x="10518" fg:w="91"/><text x="35.6641%" y="270.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:252) (138 samples, 0.46%)</title><rect x="35.2593%" y="196" width="0.4646%" height="15" fill="rgb(246,177,23)" fg:x="10472" fg:w="138"/><text x="35.5093%" y="206.50"></text></g><g><title>get (multiprocessing/queues.py:103) (98 samples, 0.33%)</title><rect x="35.3939%" y="212" width="0.3300%" height="15" fill="rgb(230,62,27)" fg:x="10512" fg:w="98"/><text x="35.6439%" y="222.50"></text></g><g><title>recv_bytes (multiprocessing/connection.py:216) (98 samples, 0.33%)</title><rect x="35.3939%" y="228" width="0.3300%" height="15" fill="rgb(216,154,8)" fg:x="10512" fg:w="98"/><text x="35.6439%" y="238.50"></text></g><g><title>_recv_bytes (multiprocessing/connection.py:437) (92 samples, 0.31%)</title><rect x="35.4141%" y="244" width="0.3098%" height="15" fill="rgb(244,35,45)" fg:x="10518" fg:w="92"/><text x="35.6641%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:264) (2,240 samples, 7.54%)</title><rect x="35.7239%" y="196" width="7.5421%" height="15" fill="rgb(251,115,12)" fg:x="10610" fg:w="2240"/><text x="35.9739%" y="206.50">_process_w..</text></g><g><title>_process_chunk (concurrent/futures/process.py:213) (2,240 samples, 7.54%)</title><rect x="35.7239%" y="212" width="7.5421%" height="15" fill="rgb(240,54,50)" fg:x="10610" fg:w="2240"/><text x="35.9739%" y="222.50">_process_c..</text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:66) (2,207 samples, 7.43%)</title><rect x="35.8350%" y="228" width="7.4310%" height="15" fill="rgb(233,84,52)" fg:x="10643" fg:w="2207"/><text x="36.0850%" y="238.50">process_ch..</text></g><g><title>update (collections/__init__.py:699) (503 samples, 1.69%)</title><rect x="41.5724%" y="244" width="1.6936%" height="15" fill="rgb(207,117,47)" fg:x="12347" fg:w="503"/><text x="41.8224%" y="254.50"></text></g><g><title>process 85431:&quot;/Users/trytry/workspace/assignment1-basics/.venv/bin/python -c from multiprocessing.spawn import spawn_main (2,406 samples, 8.10%)</title><rect x="35.2256%" y="84" width="8.1010%" height="15" fill="rgb(249,43,39)" fg:x="10462" fg:w="2406"/><text x="35.4756%" y="94.50">process 854..</text></g><g><title> spawn_main(tracker_fd=9, pipe_handle=21) --multiprocessing-fork&quot; (2,406 samples, 8.10%)</title><rect x="35.2256%" y="100" width="8.1010%" height="15" fill="rgb(209,38,44)" fg:x="10462" fg:w="2406"/><text x="35.4756%" y="110.50"> spawn_main..</text></g><g><title>&lt;module&gt; (&lt;string&gt;:1) (2,404 samples, 8.09%)</title><rect x="35.2323%" y="116" width="8.0943%" height="15" fill="rgb(236,212,23)" fg:x="10464" fg:w="2404"/><text x="35.4823%" y="126.50">&lt;module&gt; (&lt;..</text></g><g><title>spawn_main (multiprocessing/spawn.py:122) (2,404 samples, 8.09%)</title><rect x="35.2323%" y="132" width="8.0943%" height="15" fill="rgb(242,79,21)" fg:x="10464" fg:w="2404"/><text x="35.4823%" y="142.50">spawn_main ..</text></g><g><title>_main (multiprocessing/spawn.py:135) (2,396 samples, 8.07%)</title><rect x="35.2593%" y="148" width="8.0673%" height="15" fill="rgb(211,96,35)" fg:x="10472" fg:w="2396"/><text x="35.5093%" y="158.50">_main (mult..</text></g><g><title>_bootstrap (multiprocessing/process.py:314) (2,396 samples, 8.07%)</title><rect x="35.2593%" y="164" width="8.0673%" height="15" fill="rgb(253,215,40)" fg:x="10472" fg:w="2396"/><text x="35.5093%" y="174.50">_bootstrap ..</text></g><g><title>run (multiprocessing/process.py:108) (2,396 samples, 8.07%)</title><rect x="35.2593%" y="180" width="8.0673%" height="15" fill="rgb(211,81,21)" fg:x="10472" fg:w="2396"/><text x="35.5093%" y="190.50">run (multip..</text></g><g><title>get (multiprocessing/queues.py:102) (48 samples, 0.16%)</title><rect x="43.3670%" y="212" width="0.1616%" height="15" fill="rgb(208,190,38)" fg:x="12880" fg:w="48"/><text x="43.6170%" y="222.50"></text></g><g><title>__enter__ (multiprocessing/synchronize.py:95) (48 samples, 0.16%)</title><rect x="43.3670%" y="228" width="0.1616%" height="15" fill="rgb(235,213,38)" fg:x="12880" fg:w="48"/><text x="43.6170%" y="238.50"></text></g><g><title>_recv (multiprocessing/connection.py:395) (61 samples, 0.21%)</title><rect x="43.5354%" y="260" width="0.2054%" height="15" fill="rgb(237,122,38)" fg:x="12930" fg:w="61"/><text x="43.7854%" y="270.50"></text></g><g><title>get (multiprocessing/queues.py:103) (73 samples, 0.25%)</title><rect x="43.5286%" y="212" width="0.2458%" height="15" fill="rgb(244,218,35)" fg:x="12928" fg:w="73"/><text x="43.7786%" y="222.50"></text></g><g><title>recv_bytes (multiprocessing/connection.py:216) (73 samples, 0.25%)</title><rect x="43.5286%" y="228" width="0.2458%" height="15" fill="rgb(240,68,47)" fg:x="12928" fg:w="73"/><text x="43.7786%" y="238.50"></text></g><g><title>_recv_bytes (multiprocessing/connection.py:437) (71 samples, 0.24%)</title><rect x="43.5354%" y="244" width="0.2391%" height="15" fill="rgb(210,16,53)" fg:x="12930" fg:w="71"/><text x="43.7854%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:252) (122 samples, 0.41%)</title><rect x="43.3670%" y="196" width="0.4108%" height="15" fill="rgb(235,124,12)" fg:x="12880" fg:w="122"/><text x="43.6170%" y="206.50"></text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:64) (36 samples, 0.12%)</title><rect x="43.8013%" y="228" width="0.1212%" height="15" fill="rgb(224,169,11)" fg:x="13009" fg:w="36"/><text x="44.0513%" y="238.50"></text></g><g><title>split (regex/_main.py:333) (30 samples, 0.10%)</title><rect x="43.8215%" y="244" width="0.1010%" height="15" fill="rgb(250,166,2)" fg:x="13015" fg:w="30"/><text x="44.0715%" y="254.50"></text></g><g><title>update (collections/__init__.py:699) (523 samples, 1.76%)</title><rect x="49.5657%" y="244" width="1.7609%" height="15" fill="rgb(242,216,29)" fg:x="14721" fg:w="523"/><text x="49.8157%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:264) (2,244 samples, 7.56%)</title><rect x="43.7778%" y="196" width="7.5556%" height="15" fill="rgb(230,116,27)" fg:x="13002" fg:w="2244"/><text x="44.0278%" y="206.50">_process_w..</text></g><g><title>_process_chunk (concurrent/futures/process.py:213) (2,244 samples, 7.56%)</title><rect x="43.7778%" y="212" width="7.5556%" height="15" fill="rgb(228,99,48)" fg:x="13002" fg:w="2244"/><text x="44.0278%" y="222.50">_process_c..</text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:66) (2,200 samples, 7.41%)</title><rect x="43.9259%" y="228" width="7.4074%" height="15" fill="rgb(253,11,6)" fg:x="13046" fg:w="2200"/><text x="44.1759%" y="238.50">process_ch..</text></g><g><title>process 85432:&quot;/Users/trytry/workspace/assignment1-basics/.venv/bin/python -c from multiprocessing.spawn import spawn_main (2,406 samples, 8.10%)</title><rect x="43.3266%" y="84" width="8.1010%" height="15" fill="rgb(247,143,39)" fg:x="12868" fg:w="2406"/><text x="43.5766%" y="94.50">process 854..</text></g><g><title> spawn_main(tracker_fd=9, pipe_handle=23) --multiprocessing-fork&quot; (2,406 samples, 8.10%)</title><rect x="43.3266%" y="100" width="8.1010%" height="15" fill="rgb(236,97,10)" fg:x="12868" fg:w="2406"/><text x="43.5766%" y="110.50"> spawn_main..</text></g><g><title>&lt;module&gt; (&lt;string&gt;:1) (2,404 samples, 8.09%)</title><rect x="43.3333%" y="116" width="8.0943%" height="15" fill="rgb(233,208,19)" fg:x="12870" fg:w="2404"/><text x="43.5833%" y="126.50">&lt;module&gt; (&lt;..</text></g><g><title>spawn_main (multiprocessing/spawn.py:122) (2,404 samples, 8.09%)</title><rect x="43.3333%" y="132" width="8.0943%" height="15" fill="rgb(216,164,2)" fg:x="12870" fg:w="2404"/><text x="43.5833%" y="142.50">spawn_main ..</text></g><g><title>_main (multiprocessing/spawn.py:135) (2,394 samples, 8.06%)</title><rect x="43.3670%" y="148" width="8.0606%" height="15" fill="rgb(220,129,5)" fg:x="12880" fg:w="2394"/><text x="43.6170%" y="158.50">_main (mult..</text></g><g><title>_bootstrap (multiprocessing/process.py:314) (2,394 samples, 8.06%)</title><rect x="43.3670%" y="164" width="8.0606%" height="15" fill="rgb(242,17,10)" fg:x="12880" fg:w="2394"/><text x="43.6170%" y="174.50">_bootstrap ..</text></g><g><title>run (multiprocessing/process.py:108) (2,394 samples, 8.06%)</title><rect x="43.3670%" y="180" width="8.0606%" height="15" fill="rgb(242,107,0)" fg:x="12880" fg:w="2394"/><text x="43.6170%" y="190.50">run (multip..</text></g><g><title>_recv (multiprocessing/connection.py:395) (117 samples, 0.39%)</title><rect x="51.5253%" y="260" width="0.3939%" height="15" fill="rgb(251,28,31)" fg:x="15303" fg:w="117"/><text x="51.7753%" y="270.50"></text></g><g><title>get (multiprocessing/queues.py:103) (129 samples, 0.43%)</title><rect x="51.5051%" y="212" width="0.4343%" height="15" fill="rgb(233,223,10)" fg:x="15297" fg:w="129"/><text x="51.7551%" y="222.50"></text></g><g><title>recv_bytes (multiprocessing/connection.py:216) (129 samples, 0.43%)</title><rect x="51.5051%" y="228" width="0.4343%" height="15" fill="rgb(215,21,27)" fg:x="15297" fg:w="129"/><text x="51.7551%" y="238.50"></text></g><g><title>_recv_bytes (multiprocessing/connection.py:437) (123 samples, 0.41%)</title><rect x="51.5253%" y="244" width="0.4141%" height="15" fill="rgb(232,23,21)" fg:x="15303" fg:w="123"/><text x="51.7753%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:252) (140 samples, 0.47%)</title><rect x="51.4714%" y="196" width="0.4714%" height="15" fill="rgb(244,5,23)" fg:x="15287" fg:w="140"/><text x="51.7214%" y="206.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:264) (2,236 samples, 7.53%)</title><rect x="51.9428%" y="196" width="7.5286%" height="15" fill="rgb(226,81,46)" fg:x="15427" fg:w="2236"/><text x="52.1928%" y="206.50">_process_w..</text></g><g><title>_process_chunk (concurrent/futures/process.py:213) (2,236 samples, 7.53%)</title><rect x="51.9428%" y="212" width="7.5286%" height="15" fill="rgb(247,70,30)" fg:x="15427" fg:w="2236"/><text x="52.1928%" y="222.50">_process_c..</text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:66) (2,204 samples, 7.42%)</title><rect x="52.0505%" y="228" width="7.4209%" height="15" fill="rgb(212,68,19)" fg:x="15459" fg:w="2204"/><text x="52.3005%" y="238.50">process_ch..</text></g><g><title>update (collections/__init__.py:699) (485 samples, 1.63%)</title><rect x="57.8384%" y="244" width="1.6330%" height="15" fill="rgb(240,187,13)" fg:x="17178" fg:w="485"/><text x="58.0884%" y="254.50"></text></g><g><title>process 85433:&quot;/Users/trytry/workspace/assignment1-basics/.venv/bin/python -c from multiprocessing.spawn import spawn_main (2,408 samples, 8.11%)</title><rect x="51.4276%" y="84" width="8.1077%" height="15" fill="rgb(223,113,26)" fg:x="15274" fg:w="2408"/><text x="51.6776%" y="94.50">process 854..</text></g><g><title> spawn_main(tracker_fd=9, pipe_handle=25) --multiprocessing-fork&quot; (2,408 samples, 8.11%)</title><rect x="51.4276%" y="100" width="8.1077%" height="15" fill="rgb(206,192,2)" fg:x="15274" fg:w="2408"/><text x="51.6776%" y="110.50"> spawn_main..</text></g><g><title>&lt;module&gt; (&lt;string&gt;:1) (2,406 samples, 8.10%)</title><rect x="51.4343%" y="116" width="8.1010%" height="15" fill="rgb(241,108,4)" fg:x="15276" fg:w="2406"/><text x="51.6843%" y="126.50">&lt;module&gt; (&lt;..</text></g><g><title>spawn_main (multiprocessing/spawn.py:122) (2,406 samples, 8.10%)</title><rect x="51.4343%" y="132" width="8.1010%" height="15" fill="rgb(247,173,49)" fg:x="15276" fg:w="2406"/><text x="51.6843%" y="142.50">spawn_main ..</text></g><g><title>_main (multiprocessing/spawn.py:135) (2,395 samples, 8.06%)</title><rect x="51.4714%" y="148" width="8.0640%" height="15" fill="rgb(224,114,35)" fg:x="15287" fg:w="2395"/><text x="51.7214%" y="158.50">_main (mult..</text></g><g><title>_bootstrap (multiprocessing/process.py:314) (2,395 samples, 8.06%)</title><rect x="51.4714%" y="164" width="8.0640%" height="15" fill="rgb(245,159,27)" fg:x="15287" fg:w="2395"/><text x="51.7214%" y="174.50">_bootstrap ..</text></g><g><title>run (multiprocessing/process.py:108) (2,395 samples, 8.06%)</title><rect x="51.4714%" y="180" width="8.0640%" height="15" fill="rgb(245,172,44)" fg:x="15287" fg:w="2395"/><text x="51.7214%" y="190.50">run (multip..</text></g><g><title>_recv (multiprocessing/connection.py:395) (130 samples, 0.44%)</title><rect x="59.7407%" y="260" width="0.4377%" height="15" fill="rgb(236,23,11)" fg:x="17743" fg:w="130"/><text x="59.9907%" y="270.50"></text></g><g><title>get (multiprocessing/queues.py:103) (160 samples, 0.54%)</title><rect x="59.6532%" y="212" width="0.5387%" height="15" fill="rgb(205,117,38)" fg:x="17717" fg:w="160"/><text x="59.9032%" y="222.50"></text></g><g><title>recv_bytes (multiprocessing/connection.py:216) (160 samples, 0.54%)</title><rect x="59.6532%" y="228" width="0.5387%" height="15" fill="rgb(237,72,25)" fg:x="17717" fg:w="160"/><text x="59.9032%" y="238.50"></text></g><g><title>_recv_bytes (multiprocessing/connection.py:437) (134 samples, 0.45%)</title><rect x="59.7407%" y="244" width="0.4512%" height="15" fill="rgb(244,70,9)" fg:x="17743" fg:w="134"/><text x="59.9907%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:252) (185 samples, 0.62%)</title><rect x="59.5724%" y="196" width="0.6229%" height="15" fill="rgb(217,125,39)" fg:x="17693" fg:w="185"/><text x="59.8224%" y="206.50"></text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:64) (39 samples, 0.13%)</title><rect x="60.2222%" y="228" width="0.1313%" height="15" fill="rgb(235,36,10)" fg:x="17886" fg:w="39"/><text x="60.4722%" y="238.50"></text></g><g><title>split (regex/_main.py:333) (32 samples, 0.11%)</title><rect x="60.2458%" y="244" width="0.1077%" height="15" fill="rgb(251,123,47)" fg:x="17893" fg:w="32"/><text x="60.4958%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:264) (2,184 samples, 7.35%)</title><rect x="60.1953%" y="196" width="7.3535%" height="15" fill="rgb(221,13,13)" fg:x="17878" fg:w="2184"/><text x="60.4453%" y="206.50">_process_w..</text></g><g><title>_process_chunk (concurrent/futures/process.py:213) (2,184 samples, 7.35%)</title><rect x="60.1953%" y="212" width="7.3535%" height="15" fill="rgb(238,131,9)" fg:x="17878" fg:w="2184"/><text x="60.4453%" y="222.50">_process_c..</text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:66) (2,135 samples, 7.19%)</title><rect x="60.3603%" y="228" width="7.1886%" height="15" fill="rgb(211,50,8)" fg:x="17927" fg:w="2135"/><text x="60.6103%" y="238.50">process_ch..</text></g><g><title>update (collections/__init__.py:699) (457 samples, 1.54%)</title><rect x="66.0101%" y="244" width="1.5387%" height="15" fill="rgb(245,182,24)" fg:x="19605" fg:w="457"/><text x="66.2601%" y="254.50"></text></g><g><title>process 85434:&quot;/Users/trytry/workspace/assignment1-basics/.venv/bin/python -c from multiprocessing.spawn import spawn_main (2,406 samples, 8.10%)</title><rect x="59.5354%" y="84" width="8.1010%" height="15" fill="rgb(242,14,37)" fg:x="17682" fg:w="2406"/><text x="59.7854%" y="94.50">process 854..</text></g><g><title> spawn_main(tracker_fd=9, pipe_handle=27) --multiprocessing-fork&quot; (2,406 samples, 8.10%)</title><rect x="59.5354%" y="100" width="8.1010%" height="15" fill="rgb(246,228,12)" fg:x="17682" fg:w="2406"/><text x="59.7854%" y="110.50"> spawn_main..</text></g><g><title>&lt;module&gt; (&lt;string&gt;:1) (2,404 samples, 8.09%)</title><rect x="59.5421%" y="116" width="8.0943%" height="15" fill="rgb(213,55,15)" fg:x="17684" fg:w="2404"/><text x="59.7921%" y="126.50">&lt;module&gt; (&lt;..</text></g><g><title>spawn_main (multiprocessing/spawn.py:122) (2,404 samples, 8.09%)</title><rect x="59.5421%" y="132" width="8.0943%" height="15" fill="rgb(209,9,3)" fg:x="17684" fg:w="2404"/><text x="59.7921%" y="142.50">spawn_main ..</text></g><g><title>_main (multiprocessing/spawn.py:135) (2,395 samples, 8.06%)</title><rect x="59.5724%" y="148" width="8.0640%" height="15" fill="rgb(230,59,30)" fg:x="17693" fg:w="2395"/><text x="59.8224%" y="158.50">_main (mult..</text></g><g><title>_bootstrap (multiprocessing/process.py:314) (2,395 samples, 8.06%)</title><rect x="59.5724%" y="164" width="8.0640%" height="15" fill="rgb(209,121,21)" fg:x="17693" fg:w="2395"/><text x="59.8224%" y="174.50">_bootstrap ..</text></g><g><title>run (multiprocessing/process.py:108) (2,395 samples, 8.06%)</title><rect x="59.5724%" y="180" width="8.0640%" height="15" fill="rgb(220,109,13)" fg:x="17693" fg:w="2395"/><text x="59.8224%" y="190.50">run (multip..</text></g><g><title>get (multiprocessing/queues.py:102) (51 samples, 0.17%)</title><rect x="67.6431%" y="212" width="0.1717%" height="15" fill="rgb(232,18,1)" fg:x="20090" fg:w="51"/><text x="67.8931%" y="222.50"></text></g><g><title>__enter__ (multiprocessing/synchronize.py:95) (51 samples, 0.17%)</title><rect x="67.6431%" y="228" width="0.1717%" height="15" fill="rgb(215,41,42)" fg:x="20090" fg:w="51"/><text x="67.8931%" y="238.50"></text></g><g><title>_recv (multiprocessing/connection.py:395) (63 samples, 0.21%)</title><rect x="67.8215%" y="260" width="0.2121%" height="15" fill="rgb(224,123,36)" fg:x="20143" fg:w="63"/><text x="68.0715%" y="270.50"></text></g><g><title>get (multiprocessing/queues.py:103) (67 samples, 0.23%)</title><rect x="67.8148%" y="212" width="0.2256%" height="15" fill="rgb(240,125,3)" fg:x="20141" fg:w="67"/><text x="68.0648%" y="222.50"></text></g><g><title>recv_bytes (multiprocessing/connection.py:216) (67 samples, 0.23%)</title><rect x="67.8148%" y="228" width="0.2256%" height="15" fill="rgb(205,98,50)" fg:x="20141" fg:w="67"/><text x="68.0648%" y="238.50"></text></g><g><title>_recv_bytes (multiprocessing/connection.py:437) (65 samples, 0.22%)</title><rect x="67.8215%" y="244" width="0.2189%" height="15" fill="rgb(205,185,37)" fg:x="20143" fg:w="65"/><text x="68.0715%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:252) (119 samples, 0.40%)</title><rect x="67.6431%" y="196" width="0.4007%" height="15" fill="rgb(238,207,15)" fg:x="20090" fg:w="119"/><text x="67.8931%" y="206.50"></text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:64) (48 samples, 0.16%)</title><rect x="68.0943%" y="228" width="0.1616%" height="15" fill="rgb(213,199,42)" fg:x="20224" fg:w="48"/><text x="68.3443%" y="238.50"></text></g><g><title>split (regex/_main.py:333) (33 samples, 0.11%)</title><rect x="68.1448%" y="244" width="0.1111%" height="15" fill="rgb(235,201,11)" fg:x="20239" fg:w="33"/><text x="68.3948%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:264) (2,254 samples, 7.59%)</title><rect x="68.0438%" y="196" width="7.5892%" height="15" fill="rgb(207,46,11)" fg:x="20209" fg:w="2254"/><text x="68.2938%" y="206.50">_process_w..</text></g><g><title>_process_chunk (concurrent/futures/process.py:213) (2,254 samples, 7.59%)</title><rect x="68.0438%" y="212" width="7.5892%" height="15" fill="rgb(241,35,35)" fg:x="20209" fg:w="2254"/><text x="68.2938%" y="222.50">_process_c..</text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:66) (2,190 samples, 7.37%)</title><rect x="68.2593%" y="228" width="7.3737%" height="15" fill="rgb(243,32,47)" fg:x="20273" fg:w="2190"/><text x="68.5093%" y="238.50">process_ch..</text></g><g><title>update (collections/__init__.py:699) (451 samples, 1.52%)</title><rect x="74.1145%" y="244" width="1.5185%" height="15" fill="rgb(247,202,23)" fg:x="22012" fg:w="451"/><text x="74.3645%" y="254.50"></text></g><g><title>process 85435:&quot;/Users/trytry/workspace/assignment1-basics/.venv/bin/python -c from multiprocessing.spawn import spawn_main (2,398 samples, 8.07%)</title><rect x="67.6364%" y="84" width="8.0741%" height="15" fill="rgb(219,102,11)" fg:x="20088" fg:w="2398"/><text x="67.8864%" y="94.50">process 854..</text></g><g><title> spawn_main(tracker_fd=9, pipe_handle=29) --multiprocessing-fork&quot; (2,398 samples, 8.07%)</title><rect x="67.6364%" y="100" width="8.0741%" height="15" fill="rgb(243,110,44)" fg:x="20088" fg:w="2398"/><text x="67.8864%" y="110.50"> spawn_main..</text></g><g><title>&lt;module&gt; (&lt;string&gt;:1) (2,396 samples, 8.07%)</title><rect x="67.6431%" y="116" width="8.0673%" height="15" fill="rgb(222,74,54)" fg:x="20090" fg:w="2396"/><text x="67.8931%" y="126.50">&lt;module&gt; (&lt;..</text></g><g><title>spawn_main (multiprocessing/spawn.py:122) (2,396 samples, 8.07%)</title><rect x="67.6431%" y="132" width="8.0673%" height="15" fill="rgb(216,99,12)" fg:x="20090" fg:w="2396"/><text x="67.8931%" y="142.50">spawn_main ..</text></g><g><title>_main (multiprocessing/spawn.py:135) (2,396 samples, 8.07%)</title><rect x="67.6431%" y="148" width="8.0673%" height="15" fill="rgb(226,22,26)" fg:x="20090" fg:w="2396"/><text x="67.8931%" y="158.50">_main (mult..</text></g><g><title>_bootstrap (multiprocessing/process.py:314) (2,396 samples, 8.07%)</title><rect x="67.6431%" y="164" width="8.0673%" height="15" fill="rgb(217,163,10)" fg:x="20090" fg:w="2396"/><text x="67.8931%" y="174.50">_bootstrap ..</text></g><g><title>run (multiprocessing/process.py:108) (2,396 samples, 8.07%)</title><rect x="67.6431%" y="180" width="8.0673%" height="15" fill="rgb(213,25,53)" fg:x="20090" fg:w="2396"/><text x="67.8931%" y="190.50">run (multip..</text></g><g><title>get (multiprocessing/queues.py:102) (34 samples, 0.11%)</title><rect x="75.7475%" y="212" width="0.1145%" height="15" fill="rgb(252,105,26)" fg:x="22497" fg:w="34"/><text x="75.9975%" y="222.50"></text></g><g><title>__enter__ (multiprocessing/synchronize.py:95) (34 samples, 0.11%)</title><rect x="75.7475%" y="228" width="0.1145%" height="15" fill="rgb(220,39,43)" fg:x="22497" fg:w="34"/><text x="75.9975%" y="238.50"></text></g><g><title>_recv (multiprocessing/connection.py:395) (84 samples, 0.28%)</title><rect x="75.8653%" y="260" width="0.2828%" height="15" fill="rgb(229,68,48)" fg:x="22532" fg:w="84"/><text x="76.1153%" y="270.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:252) (123 samples, 0.41%)</title><rect x="75.7475%" y="196" width="0.4141%" height="15" fill="rgb(252,8,32)" fg:x="22497" fg:w="123"/><text x="75.9975%" y="206.50"></text></g><g><title>get (multiprocessing/queues.py:103) (89 samples, 0.30%)</title><rect x="75.8620%" y="212" width="0.2997%" height="15" fill="rgb(223,20,43)" fg:x="22531" fg:w="89"/><text x="76.1120%" y="222.50"></text></g><g><title>recv_bytes (multiprocessing/connection.py:216) (89 samples, 0.30%)</title><rect x="75.8620%" y="228" width="0.2997%" height="15" fill="rgb(229,81,49)" fg:x="22531" fg:w="89"/><text x="76.1120%" y="238.50"></text></g><g><title>_recv_bytes (multiprocessing/connection.py:437) (88 samples, 0.30%)</title><rect x="75.8653%" y="244" width="0.2963%" height="15" fill="rgb(236,28,36)" fg:x="22532" fg:w="88"/><text x="76.1153%" y="254.50"></text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:64) (30 samples, 0.10%)</title><rect x="76.1919%" y="228" width="0.1010%" height="15" fill="rgb(249,185,26)" fg:x="22629" fg:w="30"/><text x="76.4419%" y="238.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:264) (2,251 samples, 7.58%)</title><rect x="76.1616%" y="196" width="7.5791%" height="15" fill="rgb(249,174,33)" fg:x="22620" fg:w="2251"/><text x="76.4116%" y="206.50">_process_w..</text></g><g><title>_process_chunk (concurrent/futures/process.py:213) (2,251 samples, 7.58%)</title><rect x="76.1616%" y="212" width="7.5791%" height="15" fill="rgb(233,201,37)" fg:x="22620" fg:w="2251"/><text x="76.4116%" y="222.50">_process_c..</text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:66) (2,211 samples, 7.44%)</title><rect x="76.2963%" y="228" width="7.4444%" height="15" fill="rgb(221,78,26)" fg:x="22660" fg:w="2211"/><text x="76.5463%" y="238.50">process_ch..</text></g><g><title>update (collections/__init__.py:699) (454 samples, 1.53%)</title><rect x="82.2121%" y="244" width="1.5286%" height="15" fill="rgb(250,127,30)" fg:x="24417" fg:w="454"/><text x="82.4621%" y="254.50"></text></g><g><title>process 85436:&quot;/Users/trytry/workspace/assignment1-basics/.venv/bin/python -c from multiprocessing.spawn import spawn_main (2,407 samples, 8.10%)</title><rect x="75.7104%" y="84" width="8.1044%" height="15" fill="rgb(230,49,44)" fg:x="22486" fg:w="2407"/><text x="75.9604%" y="94.50">process 854..</text></g><g><title> spawn_main(tracker_fd=9, pipe_handle=31) --multiprocessing-fork&quot; (2,407 samples, 8.10%)</title><rect x="75.7104%" y="100" width="8.1044%" height="15" fill="rgb(229,67,23)" fg:x="22486" fg:w="2407"/><text x="75.9604%" y="110.50"> spawn_main..</text></g><g><title>&lt;module&gt; (&lt;string&gt;:1) (2,405 samples, 8.10%)</title><rect x="75.7172%" y="116" width="8.0976%" height="15" fill="rgb(249,83,47)" fg:x="22488" fg:w="2405"/><text x="75.9672%" y="126.50">&lt;module&gt; (&lt;..</text></g><g><title>spawn_main (multiprocessing/spawn.py:122) (2,405 samples, 8.10%)</title><rect x="75.7172%" y="132" width="8.0976%" height="15" fill="rgb(215,43,3)" fg:x="22488" fg:w="2405"/><text x="75.9672%" y="142.50">spawn_main ..</text></g><g><title>_main (multiprocessing/spawn.py:135) (2,396 samples, 8.07%)</title><rect x="75.7475%" y="148" width="8.0673%" height="15" fill="rgb(238,154,13)" fg:x="22497" fg:w="2396"/><text x="75.9975%" y="158.50">_main (mult..</text></g><g><title>_bootstrap (multiprocessing/process.py:314) (2,396 samples, 8.07%)</title><rect x="75.7475%" y="164" width="8.0673%" height="15" fill="rgb(219,56,2)" fg:x="22497" fg:w="2396"/><text x="75.9975%" y="174.50">_bootstrap ..</text></g><g><title>run (multiprocessing/process.py:108) (2,396 samples, 8.07%)</title><rect x="75.7475%" y="180" width="8.0673%" height="15" fill="rgb(233,0,4)" fg:x="22497" fg:w="2396"/><text x="75.9975%" y="190.50">run (multip..</text></g><g><title>get (multiprocessing/queues.py:102) (37 samples, 0.12%)</title><rect x="83.8653%" y="212" width="0.1246%" height="15" fill="rgb(235,30,7)" fg:x="24908" fg:w="37"/><text x="84.1153%" y="222.50"></text></g><g><title>__enter__ (multiprocessing/synchronize.py:95) (37 samples, 0.12%)</title><rect x="83.8653%" y="228" width="0.1246%" height="15" fill="rgb(250,79,13)" fg:x="24908" fg:w="37"/><text x="84.1153%" y="238.50"></text></g><g><title>_recv (multiprocessing/connection.py:395) (78 samples, 0.26%)</title><rect x="84.0067%" y="260" width="0.2626%" height="15" fill="rgb(211,146,34)" fg:x="24950" fg:w="78"/><text x="84.2567%" y="270.50"></text></g><g><title>get (multiprocessing/queues.py:103) (89 samples, 0.30%)</title><rect x="83.9899%" y="212" width="0.2997%" height="15" fill="rgb(228,22,38)" fg:x="24945" fg:w="89"/><text x="84.2399%" y="222.50"></text></g><g><title>recv_bytes (multiprocessing/connection.py:216) (89 samples, 0.30%)</title><rect x="83.9899%" y="228" width="0.2997%" height="15" fill="rgb(235,168,5)" fg:x="24945" fg:w="89"/><text x="84.2399%" y="238.50"></text></g><g><title>_recv_bytes (multiprocessing/connection.py:437) (84 samples, 0.28%)</title><rect x="84.0067%" y="244" width="0.2828%" height="15" fill="rgb(221,155,16)" fg:x="24950" fg:w="84"/><text x="84.2567%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:252) (127 samples, 0.43%)</title><rect x="83.8653%" y="196" width="0.4276%" height="15" fill="rgb(215,215,53)" fg:x="24908" fg:w="127"/><text x="84.1153%" y="206.50"></text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:64) (34 samples, 0.11%)</title><rect x="84.3131%" y="228" width="0.1145%" height="15" fill="rgb(223,4,10)" fg:x="25041" fg:w="34"/><text x="84.5631%" y="238.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:264) (2,246 samples, 7.56%)</title><rect x="84.2929%" y="196" width="7.5623%" height="15" fill="rgb(234,103,6)" fg:x="25035" fg:w="2246"/><text x="84.5429%" y="206.50">_process_w..</text></g><g><title>_process_chunk (concurrent/futures/process.py:213) (2,246 samples, 7.56%)</title><rect x="84.2929%" y="212" width="7.5623%" height="15" fill="rgb(227,97,0)" fg:x="25035" fg:w="2246"/><text x="84.5429%" y="222.50">_process_c..</text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:66) (2,206 samples, 7.43%)</title><rect x="84.4276%" y="228" width="7.4276%" height="15" fill="rgb(234,150,53)" fg:x="25075" fg:w="2206"/><text x="84.6776%" y="238.50">process_ch..</text></g><g><title>update (collections/__init__.py:699) (478 samples, 1.61%)</title><rect x="90.2458%" y="244" width="1.6094%" height="15" fill="rgb(228,201,54)" fg:x="26803" fg:w="478"/><text x="90.4958%" y="254.50"></text></g><g><title>process 85437:&quot;/Users/trytry/workspace/assignment1-basics/.venv/bin/python -c from multiprocessing.spawn import spawn_main (2,409 samples, 8.11%)</title><rect x="83.8148%" y="84" width="8.1111%" height="15" fill="rgb(222,22,37)" fg:x="24893" fg:w="2409"/><text x="84.0648%" y="94.50">process 854..</text></g><g><title> spawn_main(tracker_fd=9, pipe_handle=33) --multiprocessing-fork&quot; (2,409 samples, 8.11%)</title><rect x="83.8148%" y="100" width="8.1111%" height="15" fill="rgb(237,53,32)" fg:x="24893" fg:w="2409"/><text x="84.0648%" y="110.50"> spawn_main..</text></g><g><title>&lt;module&gt; (&lt;string&gt;:1) (2,406 samples, 8.10%)</title><rect x="83.8249%" y="116" width="8.1010%" height="15" fill="rgb(233,25,53)" fg:x="24896" fg:w="2406"/><text x="84.0749%" y="126.50">&lt;module&gt; (&lt;..</text></g><g><title>spawn_main (multiprocessing/spawn.py:122) (2,406 samples, 8.10%)</title><rect x="83.8249%" y="132" width="8.1010%" height="15" fill="rgb(210,40,34)" fg:x="24896" fg:w="2406"/><text x="84.0749%" y="142.50">spawn_main ..</text></g><g><title>_main (multiprocessing/spawn.py:135) (2,394 samples, 8.06%)</title><rect x="83.8653%" y="148" width="8.0606%" height="15" fill="rgb(241,220,44)" fg:x="24908" fg:w="2394"/><text x="84.1153%" y="158.50">_main (mult..</text></g><g><title>_bootstrap (multiprocessing/process.py:314) (2,394 samples, 8.06%)</title><rect x="83.8653%" y="164" width="8.0606%" height="15" fill="rgb(235,28,35)" fg:x="24908" fg:w="2394"/><text x="84.1153%" y="174.50">_bootstrap ..</text></g><g><title>run (multiprocessing/process.py:108) (2,394 samples, 8.06%)</title><rect x="83.8653%" y="180" width="8.0606%" height="15" fill="rgb(210,56,17)" fg:x="24908" fg:w="2394"/><text x="84.1153%" y="190.50">run (multip..</text></g><g><title>get (multiprocessing/queues.py:102) (39 samples, 0.13%)</title><rect x="91.9327%" y="212" width="0.1313%" height="15" fill="rgb(224,130,29)" fg:x="27304" fg:w="39"/><text x="92.1827%" y="222.50"></text></g><g><title>__enter__ (multiprocessing/synchronize.py:95) (39 samples, 0.13%)</title><rect x="91.9327%" y="228" width="0.1313%" height="15" fill="rgb(235,212,8)" fg:x="27304" fg:w="39"/><text x="92.1827%" y="238.50"></text></g><g><title>_recv (multiprocessing/connection.py:395) (95 samples, 0.32%)</title><rect x="92.0673%" y="260" width="0.3199%" height="15" fill="rgb(223,33,50)" fg:x="27344" fg:w="95"/><text x="92.3173%" y="270.50"></text></g><g><title>get (multiprocessing/queues.py:103) (97 samples, 0.33%)</title><rect x="92.0640%" y="212" width="0.3266%" height="15" fill="rgb(219,149,13)" fg:x="27343" fg:w="97"/><text x="92.3140%" y="222.50"></text></g><g><title>recv_bytes (multiprocessing/connection.py:216) (97 samples, 0.33%)</title><rect x="92.0640%" y="228" width="0.3266%" height="15" fill="rgb(250,156,29)" fg:x="27343" fg:w="97"/><text x="92.3140%" y="238.50"></text></g><g><title>_recv_bytes (multiprocessing/connection.py:437) (96 samples, 0.32%)</title><rect x="92.0673%" y="244" width="0.3232%" height="15" fill="rgb(216,193,19)" fg:x="27344" fg:w="96"/><text x="92.3173%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:252) (138 samples, 0.46%)</title><rect x="91.9327%" y="196" width="0.4646%" height="15" fill="rgb(216,135,14)" fg:x="27304" fg:w="138"/><text x="92.1827%" y="206.50"></text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:64) (31 samples, 0.10%)</title><rect x="92.4377%" y="228" width="0.1044%" height="15" fill="rgb(241,47,5)" fg:x="27454" fg:w="31"/><text x="92.6877%" y="238.50"></text></g><g><title>update (collections/__init__.py:699) (445 samples, 1.50%)</title><rect x="98.4310%" y="244" width="1.4983%" height="15" fill="rgb(233,42,35)" fg:x="29234" fg:w="445"/><text x="98.6810%" y="254.50"></text></g><g><title>_process_worker (concurrent/futures/process.py:264) (2,238 samples, 7.54%)</title><rect x="92.3973%" y="196" width="7.5354%" height="15" fill="rgb(231,13,6)" fg:x="27442" fg:w="2238"/><text x="92.6473%" y="206.50">_process_w..</text></g><g><title>_process_chunk (concurrent/futures/process.py:213) (2,238 samples, 7.54%)</title><rect x="92.3973%" y="212" width="7.5354%" height="15" fill="rgb(207,181,40)" fg:x="27442" fg:w="2238"/><text x="92.6473%" y="222.50">_process_c..</text></g><g><title>process_chunk_worker (cs336_basics/tokenizer/utils.py:66) (2,195 samples, 7.39%)</title><rect x="92.5421%" y="228" width="7.3906%" height="15" fill="rgb(254,173,49)" fg:x="27485" fg:w="2195"/><text x="92.7921%" y="238.50">process_ch..</text></g><g><title>all (29,700 samples, 100%)</title><rect x="0.0000%" y="52" width="100.0000%" height="15" fill="rgb(221,1,38)" fg:x="0" fg:w="29700"/><text x="0.2500%" y="62.50"></text></g><g><title>process 85419:&quot;python -m cs336_basics.tokenizer.bpe_trainer --input_path data/TinyStoriesV2-GPT4-train.txt --vocab_size 10000 --desired_num_chunks 512&quot; (29,700 samples, 100.00%)</title><rect x="0.0000%" y="68" width="100.0000%" height="15" fill="rgb(206,124,46)" fg:x="0" fg:w="29700"/><text x="0.2500%" y="78.50">process 85419:&quot;python -m cs336_basics.tokenizer.bpe_trainer --input_path data/TinyStoriesV2-GPT4-train.txt --vocab_size 10000 --desired_num_chunks 512&quot;</text></g><g><title>process 85438:&quot;/Users/trytry/workspace/assignment1-basics/.venv/bin/python -c from multiprocessing.spawn import spawn_main (2,398 samples, 8.07%)</title><rect x="91.9259%" y="84" width="8.0741%" height="15" fill="rgb(249,21,11)" fg:x="27302" fg:w="2398"/><text x="92.1759%" y="94.50">process 854..</text></g><g><title> spawn_main(tracker_fd=9, pipe_handle=35) --multiprocessing-fork&quot; (2,398 samples, 8.07%)</title><rect x="91.9259%" y="100" width="8.0741%" height="15" fill="rgb(222,201,40)" fg:x="27302" fg:w="2398"/><text x="92.1759%" y="110.50"> spawn_main..</text></g><g><title>&lt;module&gt; (&lt;string&gt;:1) (2,396 samples, 8.07%)</title><rect x="91.9327%" y="116" width="8.0673%" height="15" fill="rgb(235,61,29)" fg:x="27304" fg:w="2396"/><text x="92.1827%" y="126.50">&lt;module&gt; (&lt;..</text></g><g><title>spawn_main (multiprocessing/spawn.py:122) (2,396 samples, 8.07%)</title><rect x="91.9327%" y="132" width="8.0673%" height="15" fill="rgb(219,207,3)" fg:x="27304" fg:w="2396"/><text x="92.1827%" y="142.50">spawn_main ..</text></g><g><title>_main (multiprocessing/spawn.py:135) (2,396 samples, 8.07%)</title><rect x="91.9327%" y="148" width="8.0673%" height="15" fill="rgb(222,56,46)" fg:x="27304" fg:w="2396"/><text x="92.1827%" y="158.50">_main (mult..</text></g><g><title>_bootstrap (multiprocessing/process.py:314) (2,396 samples, 8.07%)</title><rect x="91.9327%" y="164" width="8.0673%" height="15" fill="rgb(239,76,54)" fg:x="27304" fg:w="2396"/><text x="92.1827%" y="174.50">_bootstrap ..</text></g><g><title>run (multiprocessing/process.py:108) (2,396 samples, 8.07%)</title><rect x="91.9327%" y="180" width="8.0673%" height="15" fill="rgb(231,124,27)" fg:x="27304" fg:w="2396"/><text x="92.1827%" y="190.50">run (multip..</text></g></svg></svg>
