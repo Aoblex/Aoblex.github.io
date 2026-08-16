@@ -113,7 +113,7 @@ Every later token is formed by concatenating two existing tokens. The vocabulary
 
 ### Pre-tokenization
 
-Pre-tokenization divides the corpus into pieces within which BPE may learn merges.
+Pre-tokenization divides the corpus into pre-tokens within which BPE may learn merges.
 
 It has two steps:
 
@@ -143,13 +143,13 @@ It has two steps:
 
 BPE grows its vocabulary by repeatedly merging the most frequent adjacent token pair.
 
-After pre-tokenization, the corpus can be represented by each unique piece $w$, its frequency $C(w)$, and its current tokenization $T_t(w)$ after $t$ merges. The corpus-wide frequency of an adjacent pair $(a,b)$ is
+After pre-tokenization, the corpus can be represented by each unique pre-token $w$, its frequency $C(w)$, and its current tokenization $T_t(w)$ after $t$ merges. The corpus-wide frequency of an adjacent pair $(a,b)$ is
 
 $$
 P_t(a,b) = \sum_w C(w)\,N_{(a,b)}\!\left(T_t(w)\right),
 $$
 
-where $N_{(a,b)}$ counts occurrences of the pair inside a tokenized word. BPE selects the pair with the largest $P_t(a,b)$ and replaces every occurrence within a pre-tokenization boundary:
+where $N_{(a,b)}$ counts occurrences of the pair within a pre-token. BPE selects the pair with the largest $P_t(a,b)$ and replaces every occurrence within a pre-tokenization boundary:
 
 $$
 (\ldots,a,b,\ldots) \longmapsto (\ldots,a \mathbin\Vert b,\ldots).
@@ -158,7 +158,7 @@ $$
 The concatenated byte sequence $a \mathbin\Vert b$ becomes a new vocabulary entry, and $(a,b)$ is appended to the merge list.
 
 > [!example]- One merge iteration
-> Consider three pre-tokenized words with $C(\texttt{low})=4$, $C(\texttt{lot})=2$, and $C(\texttt{cat})=1$.
+> Consider three pre-tokens with $C(\texttt{low})=4$, $C(\texttt{lot})=2$, and $C(\texttt{cat})=1$.
 >
 > - Before the merge: $T_t(\texttt{low})=(\texttt{l},\texttt{o},\texttt{w})$ and $T_t(\texttt{lot})=(\texttt{l},\texttt{o},\texttt{t})$.
 > - The pair $(\texttt{l},\texttt{o})$ occurs $4+2=6$ times, more than any other pair.
@@ -166,11 +166,11 @@ The concatenated byte sequence $a \mathbin\Vert b$ becomes a new vocabulary entr
 >
 > The new token `lo` is added to the vocabulary, while `cat` remains unchanged.
 
-The merge list is ordered because each decision changes the pair distribution for the next iteration. A fixed tie-breaking rule is therefore part of the tokenizer: changing it can change every later merge even when the initial counts are identical.
+The merge list is ordered because each decision changes the pair distribution for the next iteration. When several pairs have the same maximum frequency, this assignment selects the lexicographically greatest pair; changing that rule can change every later merge.
 
 ### Updating Pair Counts
 
-A full recount after every merge is unnecessary. If $(a,b)$ is selected, only words that contain this pair can change:
+A full recount after every merge is unnecessary. If $(a,b)$ is selected, only pre-tokens that contain this pair can change:
 
 $$
 \mathcal{A}_t(a,b) = \left\{w \mid N_{(a,b)}\!\left(T_t(w)\right) > 0\right\}.
@@ -182,7 +182,7 @@ $$
 P_{t+1}(p)-P_t(p) = \sum_{w \in \mathcal{A}_t(a,b)} C(w)\left[N_p\!\left(T_{t+1}(w)\right)-N_p\!\left(T_t(w)\right)\right].
 $$
 
-Words outside $\mathcal{A}_t(a,b)$ make no contribution to this difference.
+Pre-tokens outside $\mathcal{A}_t(a,b)$ make no contribution to this difference.
 
 > [!example]- Updating only affected counts
 > Continuing the example above, merging $(\texttt{l},\texttt{o})$ only affects `low` and `lot`:
@@ -191,7 +191,7 @@ Words outside $\mathcal{A}_t(a,b)$ make no contribution to this difference.
 > - add $(\texttt{lo},\texttt{w}):4$ and $(\texttt{lo},\texttt{t}):2$;
 > - leave the pair counts inside `cat` unchanged.
 
-This locality is the main algorithmic optimization. A pair-to-word index makes $\mathcal{A}_t$ directly accessible, while a priority queue avoids scanning all pairs when choosing the next merge.
+This locality is the main algorithmic optimization. An index from each pair to the pre-tokens containing it makes $\mathcal{A}_t$ directly accessible, while a priority queue avoids scanning all pairs when choosing the next merge.
 
 ## Encoding and Decoding
 
@@ -205,7 +205,7 @@ $$
 M = (m_1,m_2,\ldots,m_k).
 $$
 
-At each step, encoding applies the available merge that appears earliest in $M$. This is repeated independently within each pre-tokenized word until no learned pair remains.
+At each step, encoding applies the available merge that appears earliest in $M$. This is repeated independently within each pre-token until no learned pair remains.
 
 ### Decoding
 
@@ -314,7 +314,7 @@ $$
 > >
 > > The implementation is evaluated through `[adapters.run_train_bpe]` and the provided BPE training tests.
 > >
-> > **Answer**: The central state is the tokenization and frequency of each unique pre-tokenized word together with the global pair counts. Each iteration selects one pair, updates only the words containing it, and records the merge for later encoding.
+> > **Answer**: The central state is the tokenization and frequency of each unique pre-token together with the global pair counts. Each iteration selects one pair, updates only the affected pre-tokens, and records the merge for later encoding.
 
 > [!note]- Problem (`train_bpe_tinystories`): BPE Training on TinyStories (2 points)
 > > [!question]- (a) Train a byte-level BPE tokenizer on TinyStories
@@ -337,7 +337,8 @@ $$
 > > >   --include-children --multiprocess \
 > > >   python -m cs336_basics.tokenizer.bpe_trainer \
 > > >   --input_path data/TinyStoriesV2-GPT4-train.txt \
-> > >   --vocab_size 10000 --desired_num_chunks 512
+> > >   --vocab_size 10000 --desired_num_chunks 512 \
+> > >   --save_dir outputs/tokenizer/TinyStories
 > > > uv run --with memory-profiler --with psutil mprof peak
 > > > ```
 >
@@ -348,7 +349,7 @@ $$
 > >
 > > - **Pre-tokenization (~95% of wall-clock time):** this stage dominates training.
 > >   - **Regex matching (~78% of pre-tokenization samples):** `regex.findall` is the largest CPU hotspot.
-> >   - **Word counting (~22% of pre-tokenization samples):** `Counter.update` accounts for most of the remaining work.
+> >   - **Frequency aggregation (~22% of pre-tokenization samples):** `Counter.update` accounts for most of the remaining work.
 > > - **Merge iterations (~5% of wall-clock time):** the vocabulary construction itself takes only about 1 second.
 > >
 > > > [!example]- Full flame graph
@@ -376,14 +377,15 @@ $$
 > > **Answer**:
 > >
 > > - Pre-tokenization took approximately **2 minutes 33 seconds**, and merging took **6 minutes 13 seconds**, for a total of **8 minutes 46 seconds**.
-> > - The longest token was a 64-byte repeated encoding artifact found in the corpus.
+> > - The longest token was `b'\xc3\x83\xc3\x82' * 16`, a 64-byte sequence that decodes to the mojibake fragment `ÃÂ` repeated 16 times.
 > > - Its presence shows that BPE learns frequent byte sequences without distinguishing meaningful language from corrupted text.
 > >
 > > > [!example]- Reproduce the OpenWebText experiment
 > > > ```bash
 > > > uv run python -m cs336_basics.tokenizer.bpe_trainer \
 > > >   --input_path data/owt_train.txt \
-> > >   --vocab_size 32000 --desired_num_chunks 512
+> > >   --vocab_size 32000 --desired_num_chunks 512 \
+> > >   --save_dir outputs/tokenizer/owt
 > > > ```
 >
 > > [!question]- (b) Compare and contrast the tokenizers trained on TinyStories and OpenWebText.
@@ -394,7 +396,7 @@ $$
 > > | Corpus | Vocabulary size | Training time | Longest token |
 > > | --- | ---: | ---: | --- |
 > > | TinyStories | 10,000 | $\approx 19$ seconds | `b' accomplishment'` |
-> > | OpenWebText | 32,000 | $\approx 8$ minutes $46$ seconds | 64-byte encoding artifact |
+> > | OpenWebText | 32,000 | $\approx 8$ minutes $46$ seconds | 64-byte repeated mojibake fragment |
 > >
 > > TinyStories produces a vocabulary specialized for simple, clean stories, whereas OpenWebText also absorbs web-specific noise and encoding artifacts. BPE reflects corpus statistics rather than an external notion of linguistic quality.
 
@@ -422,7 +424,10 @@ $$
 > >
 > > $$R(x) = \frac{\text{number of UTF-8 bytes in }x}{\text{number of tokens in }x}.$$
 > >
-> > The in-domain ratios are **4.1328 bytes/token** for TinyStories and **4.5400 bytes/token** for OpenWebText.
+> > | Dataset | Tokenizer | Bytes/token |
+> > | --- | --- | ---: |
+> > | TinyStories | TinyStories | 4.1328 |
+> > | OpenWebText | OpenWebText | 4.5400 |
 > >
 > > > [!example]- Reproduce the compression measurements
 > > > ```bash
@@ -434,18 +439,10 @@ $$
 > >
 > > **Deliverable:** A one-to-two sentence response.
 > >
-> > **Answer**: The compression ratio drops from **4.5400** to **3.3475 bytes/token**, a reduction of about 26%. The TinyStories vocabulary must decompose unfamiliar web patterns into smaller units.
+> > **Answer**: The TinyStories tokenizer compresses OpenWebText less effectively because its vocabulary must decompose unfamiliar web patterns into smaller units.
 > >
-> > Encoding speed is the median of five cold-cache measurements on the same 10-document sample:
-> >
-> > | Dataset | Tokenizer | Speed | Bytes/token |
-> > | --- | --- | ---: | ---: |
-> > | TinyStories | TinyStories | 4.0496 MB/s | 4.1328 |
-> > | TinyStories | OpenWebText | 4.0662 MB/s | 3.9918 |
-> > | OpenWebText | TinyStories | 3.4162 MB/s | 3.3475 |
-> > | OpenWebText | OpenWebText | 3.2137 MB/s | 4.5400 |
-> >
-> > The compression ratios depend strongly on whether the tokenizer matches the data distribution. Throughput, by contrast, is nearly unchanged between tokenizers on the same dataset and varies more with the dataset itself.
+> > - **OpenWebText tokenizer:** 4.5400 bytes/token.
+> > - **TinyStories tokenizer:** 3.3475 bytes/token, about 26% lower.
 > >
 > > > [!example]- Reproduce the cross-domain comparison
 > > > ```bash
@@ -457,7 +454,14 @@ $$
 > >
 > > **Deliverable:** A one-to-two sentence response.
 > >
-> > **Answer**: Using $t=D/v$, the measured in-domain rates of **4.0496 MB/s** and **3.2137 MB/s** imply about **57 hours** and **71 hours**, respectively. This is only a local extrapolation: tokenizer throughput also depends on document structure and measurement conditions.
+> > **Answer**: Encoding speed is the median of five measurements with the tokenizer's memoization cache cleared between runs.
+> >
+> > | Dataset | Tokenizer | Throughput | Time for 825 GB |
+> > | --- | --- | ---: | ---: |
+> > | TinyStories | TinyStories | 4.0496 MB/s | $\approx 57$ hours |
+> > | OpenWebText | OpenWebText | 3.2137 MB/s | $\approx 71$ hours |
+> >
+> > The estimate follows $t=D/v$ and remains specific to the sampled documents and local measurement conditions.
 > >
 > > > [!example]- Reproduce the throughput benchmark
 > > > ```bash
@@ -469,8 +473,22 @@ $$
 > >
 > > **Deliverable:** A one-to-two sentence response.
 > >
-> > **Answer**: Both vocabulary sizes satisfy
+> > **Answer**: The serialized datasets contain:
+> >
+> > | Dataset | Split | Tokens | Data type |
+> > | --- | --- | ---: | --- |
+> > | TinyStories | Train | 541,229,347 | `uint16` |
+> > | TinyStories | Validation | 5,465,883 | `uint16` |
+> > | OpenWebText | Train | 2,727,120,452 | `uint16` |
+> > | OpenWebText | Validation | 66,401,098 | `uint16` |
+> >
+> > Both vocabulary sizes satisfy
 > >
 > > $$|V| \leq 32{,}000 < 2^{16} = 65{,}536.$$
 > >
 > > so every token ID fits in two bytes.
+> >
+> > > [!example]- Reproduce dataset serialization
+> > > ```bash
+> > > uv run python -m cs336_basics.tokenizer.bpe_tokenizer tokenize
+> > > ```
