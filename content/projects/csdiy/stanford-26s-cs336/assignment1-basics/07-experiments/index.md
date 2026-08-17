@@ -61,10 +61,7 @@ Tokenization determines the units presented to the model, while context length d
 A larger BPE vocabulary represents the same text with fewer tokens, but expands both the input embedding and output projection. Since token-level loss changes with the tokenization itself, vocabulary sizes are compared through bytes per token and
 
 $$
-\operatorname{bits/byte}
-=
-\frac{\mathcal{L}_{\text{token}}}{\ln 2}\,
-\frac{1}{\operatorname{bytes/token}}.
+\operatorname{bits/byte} = \frac{\mathcal{L}_{\text{token}}}{\ln 2}\,\frac{1}{\operatorname{bytes/token}}.
 $$
 
 Throughput is measured on one A100 under the same training configuration.
