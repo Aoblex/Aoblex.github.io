@@ -58,7 +58,16 @@ Tokenization determines the units presented to the model, while context length d
 
 ## Vocabulary Size
 
-A larger BPE vocabulary represents the same text with fewer tokens, but expands both the input embedding and output projection. Since token-level loss changes with the tokenization itself, vocabulary sizes are compared through bytes per token and validation bits per byte.
+A larger BPE vocabulary represents the same text with fewer tokens, but expands both the input embedding and output projection. Since token-level loss changes with the tokenization itself, vocabulary sizes are compared through bytes per token and
+
+$$
+\operatorname{bits/byte}
+=
+\frac{\mathcal{L}_{\text{token}}}{\ln 2}\,
+\frac{1}{\operatorname{bytes/token}}.
+$$
+
+Throughput is measured on one A100 under the same training configuration.
 
 | Vocabulary size | Parameters | Bytes per token | Throughput | Validation bits/byte |
 | ---: | ---: | ---: | ---: | ---: |
@@ -72,7 +81,7 @@ The gain from 10k to 20k is small: compression improves by only $0.28\%$ and val
 
 ## Context Length
 
-The context sweep fixes the model, tokenizer, token budget, and relative learning-rate schedule. Changing $L$ changes both the number of optimizer steps and the cost of each step, so final perplexity and per-iteration runtime must be considered together.
+The context sweep fixes the model, tokenizer, token budget, and relative learning-rate schedule. Changing $L$ changes both the number of optimizer steps and the cost of each step, so final perplexity and per-iteration runtime must be considered together. All runtime measurements use the same A100.
 
 | Context length | Optimizer steps | Time per step | Throughput | Final perplexity |
 | ---: | ---: | ---: | ---: | ---: |
