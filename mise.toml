@@ -6,4 +6,4 @@ run = "hugo build --gc --minify"
 [tasks.serve]
 description = "Run the local Hugo development server"
 tools."hugo-extended" = "0.160.0"
-run = "hugo server --buildDrafts"
+run = "hugo server --buildDrafts --baseURL http://localhost:1313/"
